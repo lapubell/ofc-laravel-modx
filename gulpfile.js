@@ -14,6 +14,7 @@ require('laravel-elixir-vueify');
  */
 
 elixir(function(mix) {
+    mix.copy('node_modules/font-awesome/fonts', 'public/css/fonts');
     mix.sass('app.scss');
     mix.browserify('main.js');
 });

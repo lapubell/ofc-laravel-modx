@@ -1,0 +1,1095 @@
+{
+	"auto_complete":
+	{
+		"selected_items":
+		[
+			[
+				"textal",
+				"text-align"
+			],
+			[
+				"me",
+				"menuShown"
+			],
+			[
+				"men",
+				"menuToggle"
+			],
+			[
+				"sh",
+				"menuShown"
+			],
+			[
+				"scr",
+				"screen-md-max"
+			],
+			[
+				"screen",
+				"screen-xs-max"
+			],
+			[
+				"di",
+				"display"
+			],
+			[
+				"inli",
+				"inline"
+			],
+			[
+				"font-s",
+				"font-size"
+			],
+			[
+				"font",
+				"font-size"
+			],
+			[
+				"font-fam",
+				"font-family-serif"
+			],
+			[
+				"text",
+				"text-decoration"
+			],
+			[
+				"no",
+				"nowrap"
+			],
+			[
+				"bac",
+				"background-position"
+			],
+			[
+				"se",
+				"selectedDate"
+			],
+			[
+				"chec",
+				"check-in"
+			],
+			[
+				"pin",
+				"pin_image"
+			],
+			[
+				"dinin",
+				"dining_pins"
+			],
+			[
+				"mak",
+				"make-xs-column"
+			],
+			[
+				"make",
+				"make-lg-column"
+			],
+			[
+				"grid",
+				"grid-gutter-width"
+			],
+			[
+				"te",
+				"text-align"
+			],
+			[
+				"ins",
+				"instagram_post"
+			],
+			[
+				"in",
+				"instagram_post"
+			],
+			[
+				"ath",
+				"athlete_data"
+			],
+			[
+				"backgrou",
+				"background-color"
+			],
+			[
+				"ba",
+				"background"
+			],
+			[
+				"band",
+				"band-image-offset"
+			],
+			[
+				"ma",
+				"make-md-column"
+			],
+			[
+				"nin-gr",
+				"nin-grey"
+			],
+			[
+				"str_rep",
+				"str_replace"
+			],
+			[
+				"fon",
+				"font-weight"
+			],
+			[
+				"backg",
+				"background-color"
+			],
+			[
+				"strt",
+				"strtotime"
+			],
+			[
+				"depa",
+				"department_id"
+			],
+			[
+				"array_m",
+				"array_merge"
+			],
+			[
+				"num",
+				"num_answers"
+			],
+			[
+				"rand",
+				"randomDigitNotNull"
+			],
+			[
+				"number",
+				"numberBetween"
+			],
+			[
+				"back",
+				"background-color"
+			],
+			[
+				"tab",
+				"table"
+			],
+			[
+				"font-",
+				"font-weight"
+			],
+			[
+				"fancy",
+				"fancybox-skin"
+			],
+			[
+				"smal",
+				"smallPhone"
+			],
+			[
+				"table",
+				"table-cell"
+			],
+			[
+				"bee",
+				"beers_with_recipes"
+			],
+			[
+				"backgr",
+				"background-color"
+			],
+			[
+				"inl",
+				"inline-block"
+			],
+			[
+				"list",
+				"list-style-type"
+			],
+			[
+				"downlo",
+				"downloadResource"
+			],
+			[
+				"border-co",
+				"border-collapse"
+			],
+			[
+				"dow",
+				"downloadResource"
+			],
+			[
+				"mp3",
+				"mp3_files"
+			],
+			[
+				"json",
+				"json_encode"
+			]
+		]
+	},
+	"buffers":
+	[
+		{
+			"file": "resources/views/home.blade.php",
+			"settings":
+			{
+				"buffer_size": 911,
+				"line_ending": "Unix"
+			}
+		},
+		{
+			"file": "resources/assets/sass/app.scss",
+			"settings":
+			{
+				"buffer_size": 3115,
+				"line_ending": "Unix"
+			}
+		},
+		{
+			"file": "gulpfile.js",
+			"settings":
+			{
+				"buffer_size": 638,
+				"line_ending": "Unix"
+			}
+		},
+		{
+			"file": "resources/assets/sass/_variables.scss",
+			"settings":
+			{
+				"buffer_size": 321,
+				"line_ending": "Unix"
+			}
+		},
+		{
+			"file": "resources/assets/js/main.js",
+			"settings":
+			{
+				"buffer_size": 634,
+				"line_ending": "Unix"
+			}
+		},
+		{
+			"file": "resources/assets/js/components/Home.vue",
+			"settings":
+			{
+				"buffer_size": 2330,
+				"line_ending": "Unix"
+			}
+		},
+		{
+			"file": "resources/assets/js/components/Menu.vue",
+			"settings":
+			{
+				"buffer_size": 18597,
+				"line_ending": "Unix"
+			}
+		},
+		{
+			"file": "resources/assets/js/components/Tools.vue",
+			"settings":
+			{
+				"buffer_size": 766,
+				"line_ending": "Unix"
+			}
+		}
+	],
+	"build_system": "",
+	"build_system_choices":
+	[
+	],
+	"build_varint": "",
+	"command_palette":
+	{
+		"height": 281.0,
+		"last_filter": "",
+		"selected_items":
+		[
+			[
+				"migra",
+				"Laravel Generate: Migration"
+			],
+			[
+				"packa",
+				"Package Control: Install Package"
+			],
+			[
+				"pack",
+				"Preferences: Browse Packages"
+			],
+			[
+				"mode",
+				"Laravel Generate: Model"
+			],
+			[
+				"reso",
+				"Laravel Generate: Resource"
+			],
+			[
+				"resou",
+				"Laravel Generate: Resource"
+			],
+			[
+				"res",
+				"Laravel Generate: Resource"
+			],
+			[
+				"package",
+				"Package Control: Install Package"
+			]
+		],
+		"width": 408.0
+	},
+	"console":
+	{
+		"height": 114.0,
+		"history":
+		[
+			"import urllib.request,os,hashlib; h = '7183a2d3e96f11eeadd761d777e62404' + 'e330c659d4bb41d3bdf022e94cab3cd0'; pf = 'Package Control.sublime-package'; ipp = sublime.installed_packages_path(); urllib.request.install_opener( urllib.request.build_opener( urllib.request.ProxyHandler()) ); by = urllib.request.urlopen( 'http://sublime.wbond.net/' + pf.replace(' ', '%20')).read(); dh = hashlib.sha256(by).hexdigest(); print('Error validating download (got %s instead of %s), please try manual install' % (dh, h)) if dh != h else open(os.path.join( ipp, pf), 'wb' ).write(by)"
+		]
+	},
+	"distraction_free":
+	{
+		"menu_visible": true,
+		"show_minimap": false,
+		"show_open_files": false,
+		"show_tabs": false,
+		"side_bar_visible": false,
+		"status_bar_visible": false
+	},
+	"expanded_folders":
+	[
+		"/home/lapubell/programming/php/ofc_vueify/site",
+		"/home/lapubell/programming/php/ofc_vueify/site/public",
+		"/home/lapubell/programming/php/ofc_vueify/site/public/css",
+		"/home/lapubell/programming/php/ofc_vueify/site/public/videos",
+		"/home/lapubell/programming/php/ofc_vueify/site/resources",
+		"/home/lapubell/programming/php/ofc_vueify/site/resources/assets",
+		"/home/lapubell/programming/php/ofc_vueify/site/resources/assets/images",
+		"/home/lapubell/programming/php/ofc_vueify/site/resources/assets/js",
+		"/home/lapubell/programming/php/ofc_vueify/site/resources/assets/js/components",
+		"/home/lapubell/programming/php/ofc_vueify/site/resources/assets/sass",
+		"/home/lapubell/programming/php/ofc_vueify/site/resources/views"
+	],
+	"file_history":
+	[
+		"/home/lapubell/programming/php/ofc_vueify/site/resources/assets/js/components/Menu.vue",
+		"/home/lapubell/programming/php/ofc_vueify/site/resources/assets/js/components/Header.vue",
+		"/home/lapubell/programming/php/aspensnowmassproperties/.htaccess.ORIG.1",
+		"/home/lapubell/programming/php/ofc_single/images/logo.svg",
+		"/home/lapubell/programming/php/ofc_vueify/site/resources/assets/js/components/Home.vue",
+		"/home/lapubell/programming/php/ofc_vueify/site/package.json",
+		"/home/lapubell/programming/php/hollaway/less/_global.less",
+		"/home/lapubell/programming/php/hollaway/less/_variables.less",
+		"/home/lapubell/programming/php/hollaway/style.css",
+		"/home/lapubell/programming/php/hollaway/less/layouts/practice-area.less",
+		"/home/lapubell/programming/php/hollaway/nav.php",
+		"/home/lapubell/programming/php/hollaway/header.php",
+		"/home/lapubell/programming/php/hollaway/footer.php",
+		"/home/lapubell/programming/php/hollaway/js/main.js",
+		"/home/lapubell/programming/php/hollaway/less/_nav.less",
+		"/home/lapubell/programming/php/hollaway/less/layouts/casestudy.less",
+		"/home/lapubell/programming/php/hollaway/less/layouts/home.less",
+		"/home/lapubell/programming/shopify/ahd_beta/snippets/old-contant-form.liquid",
+		"/home/lapubell/programming/shopify/ahd_beta/templates/page.contact.liquid",
+		"/home/lapubell/programming/php/service_freak/app/sf/app/Role.php",
+		"/home/lapubell/programming/php/service_freak/app/sf/resources/views/partials/head.blade.php",
+		"/home/lapubell/programming/php/service_freak/app/sf/composer.json",
+		"/home/lapubell/programming/php/service_freak/app/sf/gulpfile.js",
+		"/home/lapubell/programming/php/service_freak/app/sf/app/Http/Controllers/ModuleController.php",
+		"/home/lapubell/programming/php/service_freak/app/sf/database/migrations/2016_01_26_222711_create_modules_table.php",
+		"/home/lapubell/programming/php/service_freak/app/sf/config/app.php",
+		"/home/lapubell/programming/php/service_freak/app/sf/app/Http/Kernel.php",
+		"/home/lapubell/programming/php/service_freak/app/sf/app/User.php",
+		"/home/lapubell/programming/php/service_freak/app/sf/app/Http/Controllers/Auth/AuthController.php",
+		"/home/lapubell/programming/php/service_freak/app/sf/app/Http/Controllers/HomeController.php",
+		"/home/lapubell/programming/php/vacation/database/migrations/2016_03_24_011814_add_reminders_to_rental_properties.php",
+		"/home/lapubell/programming/php/service_freak/app/sf/database/migrations/2016_04_18_190443_add_featured_column_to_modules_table.php",
+		"/home/lapubell/programming/php/service_freak/app/sf/app/PasswordGrantVerifier.php",
+		"/home/lapubell/programming/php/service_freak/app/sf/resources/assets/sass/global.scss",
+		"/home/lapubell/programming/php/service_freak/app/sf/resources/assets/sass/nav.scss",
+		"/home/lapubell/programming/php/service_freak/app/sf/app/Http/Controllers/AdminController.php",
+		"/home/lapubell/programming/php/service_freak/app/sf/resources/views/partials/nav.blade.php",
+		"/home/lapubell/programming/php/service_freak/app/sf/resources/views/layouts/public.blade.php",
+		"/home/lapubell/programming/php/service_freak/app/sf/resources/views/layouts/main.blade.php",
+		"/home/lapubell/programming/php/service_freak/app/sf/resources/views/public/index.blade.php",
+		"/home/lapubell/programming/php/service_freak/app/sf/app/Http/Controllers/PublicController.php",
+		"/home/lapubell/programming/php/vacation/app/Http/routes.php",
+		"/home/lapubell/programming/php/service_freak/app/sf/resources/assets/sass/variables.scss",
+		"/home/lapubell/programming/php/service_freak/app/sf/resources/views/auth/login.blade.php",
+		"/home/lapubell/programming/php/service_freak/app/sf/database/seeds/UserTableSeeder.php",
+		"/home/lapubell/programming/php/service_freak/app/sf/database/seeds/RoleTableSeeder.php",
+		"/home/lapubell/programming/php/service_freak/app/sf/database/migrations/2014_10_12_000000_create_users_table.php",
+		"/home/lapubell/programming/php/service_freak/app/sf/database/migrations/2016_01_26_223330_create_roles_table.php",
+		"/home/lapubell/programming/php/service_freak/app/sf/database/seeds/DatabaseSeeder.php",
+		"/home/lapubell/programming/php/service_freak/app/sf/database/migrations/2016_01_26_223027_create_lessons_table.php",
+		"/home/lapubell/programming/php/service_freak/app/sf/database/migrations/2016_01_26_223610_create_certificates_table.php",
+		"/home/lapubell/programming/php/service_freak/app/sf/.env",
+		"/home/lapubell/programming/php/service_freak/app/sf/database/migrations/2016_01_26_215028_create_organizations_table.php",
+		"/home/lapubell/programming/php/service_freak/app/sf/resources/views/login.blade.php",
+		"/home/lapubell/programming/php/vacation/resources/views/member/assistant/create.blade.php",
+		"/home/lapubell/programming/php/service_freak/app/sf/resources/views/partials/foot.blade.php",
+		"/home/lapubell/programming/php/service_freak/app/sf/app/Providers/RouteServiceProvider.php",
+		"/home/lapubell/programming/php/vacation/resources/views/partials/head.blade.php",
+		"/home/lapubell/programming/php/service_freak/app/sf/resources/views/welcome.blade.php",
+		"/home/lapubell/programming/php/suntel/public_html/wp-content/themes/denali/functions.php",
+		"/home/lapubell/programming/php/hatfield/repo/ofc-base-modx/css/amenities.less",
+		"/home/lapubell/programming/php/hatfield/repo/ofc-base-modx/css/accomidations.less",
+		"/home/lapubell/programming/php/hatfield/repo/ofc-base-modx/css/standard.less",
+		"/home/lapubell/programming/php/hatfield/repo/ofc-base-modx/css/footer.less",
+		"/home/lapubell/programming/php/hatfield/repo/ofc-base-modx/css/variables.less",
+		"/home/lapubell/programming/php/hatfield/repo/ofc-base-modx/css/map.less",
+		"/home/lapubell/programming/php/hatfield/repo/ofc-base-modx/css/gallery.less",
+		"/home/lapubell/programming/php/hatfield/repo/ofc-base-modx/css/global.less",
+		"/home/lapubell/programming/php/hatfield/repo/ofc-base-modx/css/contact.less",
+		"/home/lapubell/programming/php/hatfield/repo/ofc-base-modx/css/home.less",
+		"/home/lapubell/programming/php/hatfield/repo/ofc-base-modx/css/nav.less",
+		"/home/lapubell/programming/php/hatfield/repo/ofc-base-modx/templates/standard.tpl",
+		"/home/lapubell/programming/php/hatfield/repo/ofc-base-modx/templates/home.tpl",
+		"/home/lapubell/programming/php/hatfield/repo/ofc-base-modx/chunks/Slider_Slide_cycle2.tpl",
+		"/home/lapubell/programming/php/service_freak/bounces/REJECTED EMAILS/Undeliverable  Conference on Customer Service (100).eml",
+		"/home/lapubell/programming/php/service_freak/bounces/REJECTED EMAILS/Undeliverable  Conference on Customer Service (98).eml",
+		"/home/lapubell/programming/php/service_freak/bounces/REJECTED EMAILS/Undeliverable  Conference on Customer Service (97).eml",
+		"/home/lapubell/programming/php/service_freak/bounces/REJECTED EMAILS/Undeliverable  Conference on Customer Service (96).eml",
+		"/home/lapubell/programming/php/service_freak/bounces/REJECTED EMAILS/Undeliverable  Conference on Customer Service (93).eml",
+		"/home/lapubell/programming/php/service_freak/bounces/REJECTED EMAILS/Undeliverable  Conference on Customer Service (92).eml",
+		"/home/lapubell/programming/php/service_freak/bounces/REJECTED EMAILS/Undeliverable  Conference on Customer Service (91).eml",
+		"/home/lapubell/programming/php/service_freak/bounces/REJECTED EMAILS/Undeliverable  Conference on Customer Service (90).eml",
+		"/home/lapubell/programming/php/service_freak/bounces/REJECTED EMAILS/Undeliverable  Conference on Customer Service (89).eml",
+		"/home/lapubell/programming/php/service_freak/bounces/REJECTED EMAILS/Undeliverable  Conference on Customer Service (88).eml",
+		"/home/lapubell/programming/php/service_freak/bounces/REJECTED EMAILS/Undeliverable  Conference on Customer Service (87).eml",
+		"/home/lapubell/programming/php/service_freak/bounces/REJECTED EMAILS/Undeliverable  Conference on Customer Service (86).eml",
+		"/home/lapubell/programming/php/service_freak/bounces/REJECTED EMAILS/Undeliverable  Conference on Customer Service (85).eml",
+		"/home/lapubell/programming/php/service_freak/bounces/REJECTED EMAILS/Undeliverable  Conference on Customer Service (84).eml",
+		"/home/lapubell/programming/php/service_freak/bounces/REJECTED EMAILS/Undeliverable  Conference on Customer Service (83).eml",
+		"/home/lapubell/programming/php/service_freak/bounces/REJECTED EMAILS/Undeliverable  Conference on Customer Service (82).eml",
+		"/home/lapubell/programming/php/service_freak/bounces/REJECTED EMAILS/Undeliverable  Conference on Customer Service (79).eml",
+		"/home/lapubell/programming/php/service_freak/bounces/REJECTED EMAILS/Undeliverable  Conference on Customer Service (78).eml",
+		"/home/lapubell/programming/php/service_freak/bounces/REJECTED EMAILS/Undeliverable  Conference on Customer Service (77).eml",
+		"/home/lapubell/programming/php/service_freak/bounces/REJECTED EMAILS/Undeliverable  Conference on Customer Service (76).eml",
+		"/home/lapubell/programming/php/service_freak/bounces/REJECTED EMAILS/Undeliverable  Conference on Customer Service (75).eml",
+		"/home/lapubell/programming/php/service_freak/bounces/REJECTED EMAILS/Undeliverable  Conference on Customer Service (74).eml",
+		"/home/lapubell/programming/php/service_freak/bounces/REJECTED EMAILS/Undeliverable  Conference on Customer Service (73).eml",
+		"/home/lapubell/programming/php/service_freak/bounces/REJECTED EMAILS/Undeliverable  Conference on Customer Service (72).eml",
+		"/home/lapubell/programming/php/service_freak/bounces/REJECTED EMAILS/Undeliverable  Conference on Customer Service (71).eml",
+		"/home/lapubell/programming/php/service_freak/bounces/REJECTED EMAILS/Undeliverable  Conference on Customer Service (70).eml",
+		"/home/lapubell/programming/php/service_freak/bounces/REJECTED EMAILS/Undeliverable  Conference on Customer Service (69).eml",
+		"/home/lapubell/programming/php/service_freak/bounces/REJECTED EMAILS/Undeliverable  Conference on Customer Service (68).eml",
+		"/home/lapubell/programming/php/service_freak/bounces/REJECTED EMAILS/Undeliverable  Conference on Customer Service (67).eml",
+		"/home/lapubell/programming/php/service_freak/bounces/REJECTED EMAILS/Undeliverable  Conference on Customer Service (65).eml",
+		"/home/lapubell/programming/php/service_freak/bounces/REJECTED EMAILS/Undeliverable  Conference on Customer Service (64).eml",
+		"/home/lapubell/programming/php/service_freak/bounces/REJECTED EMAILS/Undeliverable  Conference on Customer Service (63).eml",
+		"/home/lapubell/programming/php/service_freak/bounces/REJECTED EMAILS/Undeliverable  Conference on Customer Service (62).eml",
+		"/home/lapubell/programming/php/service_freak/bounces/REJECTED EMAILS/Undeliverable  Conference on Customer Service (61).eml",
+		"/home/lapubell/programming/php/service_freak/bounces/REJECTED EMAILS/Undeliverable  Conference on Customer Service (60).eml",
+		"/home/lapubell/programming/php/service_freak/bounces/REJECTED EMAILS/Undeliverable  Conference on Customer Service (59).eml",
+		"/home/lapubell/programming/php/service_freak/bounces/REJECTED EMAILS/Undeliverable  Conference on Customer Service (58).eml",
+		"/home/lapubell/programming/php/service_freak/bounces/REJECTED EMAILS/Undeliverable  Conference on Customer Service (57).eml",
+		"/home/lapubell/programming/php/service_freak/bounces/REJECTED EMAILS/Undeliverable  Conference on Customer Service (56).eml",
+		"/home/lapubell/programming/php/service_freak/bounces/REJECTED EMAILS/Undeliverable  Conference on Customer Service (55).eml",
+		"/home/lapubell/programming/php/service_freak/bounces/REJECTED EMAILS/Undeliverable  Conference on Customer Service (54).eml",
+		"/home/lapubell/programming/php/service_freak/bounces/REJECTED EMAILS/Undeliverable  Conference on Customer Service (53).eml",
+		"/home/lapubell/programming/php/service_freak/bounces/REJECTED EMAILS/Undeliverable  Conference on Customer Service (52).eml",
+		"/home/lapubell/programming/php/service_freak/bounces/REJECTED EMAILS/Undeliverable  Conference on Customer Service (51).eml",
+		"/home/lapubell/programming/php/service_freak/bounces/REJECTED EMAILS/Undeliverable  Conference on Customer Service (50).eml",
+		"/home/lapubell/programming/php/service_freak/bounces/REJECTED EMAILS/Undeliverable  Conference on Customer Service (48).eml",
+		"/home/lapubell/programming/php/service_freak/bounces/REJECTED EMAILS/Undeliverable  Conference on Customer Service (46).eml",
+		"/home/lapubell/programming/php/service_freak/bounces/REJECTED EMAILS/Undeliverable  Conference on Customer Service (44).eml",
+		"/home/lapubell/programming/php/service_freak/bounces/REJECTED EMAILS/Undeliverable  Conference on Customer Service (43).eml",
+		"/home/lapubell/programming/php/service_freak/bounces/REJECTED EMAILS/Undeliverable  Conference on Customer Service (42).eml",
+		"/home/lapubell/programming/php/service_freak/bounces/REJECTED EMAILS/Undeliverable  Conference on Customer Service (41).eml",
+		"/home/lapubell/programming/php/service_freak/bounces/REJECTED EMAILS/Undeliverable  Conference on Customer Service (40).eml",
+		"/home/lapubell/programming/php/service_freak/bounces/REJECTED EMAILS/Undeliverable  Conference on Customer Service (39).eml",
+		"/home/lapubell/programming/php/service_freak/bounces/REJECTED EMAILS/Undeliverable  Conference on Customer Service (38).eml"
+	],
+	"find":
+	{
+		"height": 35.0
+	},
+	"find_in_files":
+	{
+		"height": 161.0,
+		"where_history":
+		[
+			"/home/lapubell/programming/php/suntel/public_html/wp-content/themes/denali"
+		]
+	},
+	"find_state":
+	{
+		"case_sensitive": false,
+		"find_history":
+		[
+			"nav",
+			"home-mess",
+			"gettit",
+			"shop",
+			"shops",
+			"text",
+			"extend(",
+			"property_search",
+			"property_se",
+			"red",
+			"inherit",
+			"toggle",
+			"4",
+			"1",
+			"tot_adulti",
+			"3",
+			"1",
+			"amenities",
+			"hotel_policies",
+			"<p>",
+			"margin",
+			"1",
+			"check-in",
+			"<a",
+			"Twitter",
+			"twitter",
+			"Instagram",
+			"instagram",
+			"title",
+			"@dark-orange",
+			"@orange",
+			"orange-",
+			"    <div class='container'>\n        <div class='row'>\n",
+			"content-",
+			"web",
+			"import ",
+			"import",
+			"div",
+			"s4",
+			"s3",
+			"s2",
+			"s1",
+			"sTop",
+			"footer",
+			"@medi",
+			"only s",
+			"808",
+			"bkg-",
+			":first",
+			"quick",
+			":fir",
+			"post",
+			"blog",
+			"	<li>",
+			"</li>",
+			"	<li>",
+			"</li>",
+			"h5",
+			"<p>",
+			"</p>",
+			"<ul>",
+			"	<li>",
+			"</li>",
+			"</ul>",
+			"	<li><span style=\"line-height: 1.714285714; font-size: 1rem;\">",
+			"</span></li>",
+			"<p>",
+			"</p>",
+			"<ul>",
+			"<p>",
+			"</li>",
+			"</ul>",
+			"<p>",
+			"</p>",
+			"	<li>",
+			"<p>",
+			"</p>",
+			"<li>",
+			"</li>",
+			"</ul>",
+			"<p>",
+			"</p>",
+			"	<li>",
+			"	<li><span style=\"line-height: 1.714285714; font-size: 1rem;\">",
+			"<li><span style=\"line-height: 1.714285714; font-size: 1rem;\">",
+			"</span></li>",
+			"<li>",
+			"</li>",
+			"<ul>",
+			"	<li>",
+			"<li>",
+			"</li>",
+			"<p>",
+			"</li>",
+			"blog",
+			"0,",
+			"0,0",
+			"0,",
+			"01",
+			"  ",
+			"	",
+			"(	\"",
+			"	",
+			"jqxhr",
+			"beer"
+		],
+		"highlight": true,
+		"in_selection": false,
+		"preserve_case": false,
+		"regex": true,
+		"replace_history":
+		[
+			"02",
+			"03",
+			"04",
+			"05",
+			"06",
+			"07",
+			"08",
+			"09",
+			"10",
+			"11",
+			"12",
+			"13",
+			"14",
+			"15",
+			"16",
+			"17",
+			"18",
+			"19",
+			"20",
+			"\\t",
+			"  "
+		],
+		"reverse": false,
+		"show_context": true,
+		"use_buffer2": true,
+		"whole_word": false,
+		"wrap": true
+	},
+	"groups":
+	[
+		{
+			"selected": 5,
+			"sheets":
+			[
+				{
+					"buffer": 0,
+					"file": "resources/views/home.blade.php",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 911,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								753,
+								753
+							]
+						],
+						"settings":
+						{
+							"syntax": "Packages/Laravel Blade Highlighter/blade.sublime-syntax"
+						},
+						"translation.x": 0.0,
+						"translation.y": 450.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 2,
+					"type": "text"
+				},
+				{
+					"buffer": 1,
+					"file": "resources/assets/sass/app.scss",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 3115,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								1454,
+								1454
+							]
+						],
+						"settings":
+						{
+							"syntax": "Packages/Sass/Syntaxes/Sass.tmLanguage"
+						},
+						"translation.x": 0.0,
+						"translation.y": 2237.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 1,
+					"type": "text"
+				},
+				{
+					"buffer": 2,
+					"file": "gulpfile.js",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 638,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								483,
+								483
+							]
+						],
+						"settings":
+						{
+							"syntax": "Packages/Theme - Afterglow/Prefs/Langs/Gulpfile JS.tmLanguage"
+						},
+						"translation.x": 0.0,
+						"translation.y": 0.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 6,
+					"type": "text"
+				},
+				{
+					"buffer": 3,
+					"file": "resources/assets/sass/_variables.scss",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 321,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								258,
+								258
+							]
+						],
+						"settings":
+						{
+							"syntax": "Packages/Sass/Syntaxes/Sass.tmLanguage"
+						},
+						"translation.x": 0.0,
+						"translation.y": 0.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 5,
+					"type": "text"
+				},
+				{
+					"buffer": 4,
+					"file": "resources/assets/js/main.js",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 634,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								606,
+								606
+							]
+						],
+						"settings":
+						{
+							"syntax": "Packages/JavaScript/JavaScript.sublime-syntax",
+							"tab_size": 4,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": 0.0,
+						"translation.y": 540.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 4,
+					"type": "text"
+				},
+				{
+					"buffer": 5,
+					"file": "resources/assets/js/components/Home.vue",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 2330,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								888,
+								888
+							]
+						],
+						"settings":
+						{
+							"syntax": "Packages/Vue Syntax Highlight/vue.tmLanguage",
+							"tab_size": 4,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": 0.0,
+						"translation.y": 90.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 0,
+					"type": "text"
+				},
+				{
+					"buffer": 6,
+					"file": "resources/assets/js/components/Menu.vue",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 18597,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								17466,
+								17466
+							]
+						],
+						"settings":
+						{
+							"syntax": "Packages/Vue Syntax Highlight/vue.tmLanguage",
+							"tab_size": 4,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": 0.0,
+						"translation.y": 7763.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 3,
+					"type": "text"
+				},
+				{
+					"buffer": 7,
+					"file": "resources/assets/js/components/Tools.vue",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 766,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								502,
+								502
+							]
+						],
+						"settings":
+						{
+							"syntax": "Packages/Vue Syntax Highlight/vue.tmLanguage",
+							"tab_size": 4,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": 0.0,
+						"translation.y": 0.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 7,
+					"type": "text"
+				}
+			]
+		}
+	],
+	"incremental_find":
+	{
+		"height": 35.0
+	},
+	"input":
+	{
+		"height": 41.0
+	},
+	"layout":
+	{
+		"cells":
+		[
+			[
+				0,
+				0,
+				1,
+				1
+			]
+		],
+		"cols":
+		[
+			0.0,
+			1.0
+		],
+		"rows":
+		[
+			0.0,
+			1.0
+		]
+	},
+	"menu_visible": true,
+	"output.exec":
+	{
+		"height": 176.0
+	},
+	"output.find_results":
+	{
+		"height": 0.0
+	},
+	"pinned_build_system": "Packages/User/LESS Project Build.sublime-build",
+	"project": "ofc_vueify.sublime-project",
+	"replace":
+	{
+		"height": 66.0
+	},
+	"save_all_on_build": true,
+	"select_file":
+	{
+		"height": 0.0,
+		"last_filter": "",
+		"selected_items":
+		[
+			[
+				"g",
+				"gulpfile.js"
+			],
+			[
+				"pack",
+				"package.json"
+			],
+			[
+				"syl",
+				"assets/styles.scss.liquid"
+			],
+			[
+				"page.con",
+				"templates/page.contact.liquid"
+			],
+			[
+				"comp",
+				"composer.json"
+			],
+			[
+				"dash",
+				"app/Http/Controllers/DashboardController.php"
+			],
+			[
+				"modulecon",
+				"app/Http/Controllers/ModuleController.php"
+			],
+			[
+				"createmodul",
+				"database/migrations/2016_01_26_222711_create_modules_table.php"
+			],
+			[
+				"hoomecon",
+				"app/Http/Controllers/HomeController.php"
+			],
+			[
+				"authcon",
+				"app/Http/Controllers/Auth/AuthController.php"
+			],
+			[
+				"route",
+				"app/Http/routes.php"
+			],
+			[
+				"role",
+				"app/Role.php"
+			],
+			[
+				"dashcon",
+				"app/Http/Controllers/DashboardController.php"
+			],
+			[
+				"main.bla",
+				"resources/views/layouts/main.blade.php"
+			],
+			[
+				"rolet",
+				"database/seeds/RoleTableSeeder.php"
+			],
+			[
+				"userta",
+				"database/seeds/UserTableSeeder.php"
+			],
+			[
+				"rolese",
+				"database/seeds/RoleTableSeeder.php"
+			],
+			[
+				"user",
+				"app/User.php"
+			],
+			[
+				"rol",
+				"app/Role.php"
+			],
+			[
+				"publiccon",
+				"app/Http/Controllers/PublicController.php"
+			],
+			[
+				".env",
+				".env"
+			],
+			[
+				"head.b",
+				"resources/views/partials/head.blade.php"
+			],
+			[
+				"app.p",
+				"config/app.php"
+			],
+			[
+				"routes.",
+				"app/Http/routes.php"
+			],
+			[
+				"admin",
+				"app/Http/Controllers/AdminController.php"
+			],
+			[
+				"routes",
+				"app/Providers/RouteServiceProvider.php"
+			],
+			[
+				"pages.l",
+				"wp-content/themes/roots/assets/less/layouts/_pages.less"
+			],
+			[
+				"_semin",
+				"wp-content/themes/roots/assets/less/layouts/_seminar.less"
+			]
+		],
+		"width": 0.0
+	},
+	"select_project":
+	{
+		"height": 0.0,
+		"last_filter": "",
+		"selected_items":
+		[
+		],
+		"width": 0.0
+	},
+	"select_symbol":
+	{
+		"height": 0.0,
+		"last_filter": "",
+		"selected_items":
+		[
+		],
+		"width": 0.0
+	},
+	"selected_group": 0,
+	"settings":
+	{
+	},
+	"show_minimap": true,
+	"show_open_files": true,
+	"show_tabs": true,
+	"side_bar_visible": true,
+	"side_bar_width": 363.0,
+	"status_bar_visible": true,
+	"template_settings":
+	{
+	}
+}

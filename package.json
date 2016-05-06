@@ -5,8 +5,10 @@
   },
   "dependencies": {
     "bootstrap-sass": "^3.0.0",
-    "laravel-elixir": "^3.0.0",
+    "font-awesome": "^4.6.1",
+    "laravel-elixir": "^4.0.0",
     "laravel-elixir-vueify": "^1.0.2",
+    "node-sass": "^3.7.0",
     "vue-resource": "^0.7.0",
     "vue-router": "^0.7.12"
   }

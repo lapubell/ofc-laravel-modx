@@ -1,6 +1,7 @@
 <template>
     <div class='clients'>
-        Clients
+        <h2>{{title}}</h2>
+        <p>{{ description }}</p>
     </div>
 </template>
 
@@ -15,6 +16,8 @@
 export default {
     data() {
         return {
+            title: 'We love our clients',
+            description: "Weather you work with us directly, or work with us through an agency, your goals are our goals.",
             name: 'Laracasts'
         };
     }

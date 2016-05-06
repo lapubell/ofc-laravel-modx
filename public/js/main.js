@@ -92,6 +92,306 @@ process.chdir = function (dir) {
 process.umask = function() { return 0; };
 
 },{}],2:[function(require,module,exports){
+var Vue // late bind
+var map = Object.create(null)
+var shimmed = false
+var isBrowserify = false
+
+/**
+ * Determine compatibility and apply patch.
+ *
+ * @param {Function} vue
+ * @param {Boolean} browserify
+ */
+
+exports.install = function (vue, browserify) {
+  if (shimmed) return
+  shimmed = true
+
+  Vue = vue
+  isBrowserify = browserify
+
+  exports.compatible = !!Vue.internalDirectives
+  if (!exports.compatible) {
+    console.warn(
+      '[HMR] vue-loader hot reload is only compatible with ' +
+      'Vue.js 1.0.0+.'
+    )
+    return
+  }
+
+  // patch view directive
+  patchView(Vue.internalDirectives.component)
+  console.log('[HMR] Vue component hot reload shim applied.')
+  // shim router-view if present
+  var routerView = Vue.elementDirective('router-view')
+  if (routerView) {
+    patchView(routerView)
+    console.log('[HMR] vue-router <router-view> hot reload shim applied.')
+  }
+}
+
+/**
+ * Shim the view directive (component or router-view).
+ *
+ * @param {Object} View
+ */
+
+function patchView (View) {
+  var unbuild = View.unbuild
+  View.unbuild = function (defer) {
+    if (!this.hotUpdating) {
+      var prevComponent = this.childVM && this.childVM.constructor
+      removeView(prevComponent, this)
+      // defer = true means we are transitioning to a new
+      // Component. Register this new component to the list.
+      if (defer) {
+        addView(this.Component, this)
+      }
+    }
+    // call original
+    return unbuild.call(this, defer)
+  }
+}
+
+/**
+ * Add a component view to a Component's hot list
+ *
+ * @param {Function} Component
+ * @param {Directive} view - view directive instance
+ */
+
+function addView (Component, view) {
+  var id = Component && Component.options.hotID
+  if (id) {
+    if (!map[id]) {
+      map[id] = {
+        Component: Component,
+        views: [],
+        instances: []
+      }
+    }
+    map[id].views.push(view)
+  }
+}
+
+/**
+ * Remove a component view from a Component's hot list
+ *
+ * @param {Function} Component
+ * @param {Directive} view - view directive instance
+ */
+
+function removeView (Component, view) {
+  var id = Component && Component.options.hotID
+  if (id) {
+    map[id].views.$remove(view)
+  }
+}
+
+/**
+ * Create a record for a hot module, which keeps track of its construcotr,
+ * instnaces and views (component directives or router-views).
+ *
+ * @param {String} id
+ * @param {Object} options
+ */
+
+exports.createRecord = function (id, options) {
+  if (typeof options === 'function') {
+    options = options.options
+  }
+  if (typeof options.el !== 'string' && typeof options.data !== 'object') {
+    makeOptionsHot(id, options)
+    map[id] = {
+      Component: null,
+      views: [],
+      instances: []
+    }
+  }
+}
+
+/**
+ * Make a Component options object hot.
+ *
+ * @param {String} id
+ * @param {Object} options
+ */
+
+function makeOptionsHot (id, options) {
+  options.hotID = id
+  injectHook(options, 'created', function () {
+    var record = map[id]
+    if (!record.Component) {
+      record.Component = this.constructor
+    }
+    record.instances.push(this)
+  })
+  injectHook(options, 'beforeDestroy', function () {
+    map[id].instances.$remove(this)
+  })
+}
+
+/**
+ * Inject a hook to a hot reloadable component so that
+ * we can keep track of it.
+ *
+ * @param {Object} options
+ * @param {String} name
+ * @param {Function} hook
+ */
+
+function injectHook (options, name, hook) {
+  var existing = options[name]
+  options[name] = existing
+    ? Array.isArray(existing)
+      ? existing.concat(hook)
+      : [existing, hook]
+    : [hook]
+}
+
+/**
+ * Update a hot component.
+ *
+ * @param {String} id
+ * @param {Object|null} newOptions
+ * @param {String|null} newTemplate
+ */
+
+exports.update = function (id, newOptions, newTemplate) {
+  var record = map[id]
+  // force full-reload if an instance of the component is active but is not
+  // managed by a view
+  if (!record || (record.instances.length && !record.views.length)) {
+    console.log('[HMR] Root or manually-mounted instance modified. Full reload may be required.')
+    if (!isBrowserify) {
+      window.location.reload()
+    } else {
+      // browserify-hmr somehow sends incomplete bundle if we reload here
+      return
+    }
+  }
+  if (!isBrowserify) {
+    // browserify-hmr already logs this
+    console.log('[HMR] Updating component: ' + format(id))
+  }
+  var Component = record.Component
+  // update constructor
+  if (newOptions) {
+    // in case the user exports a constructor
+    Component = record.Component = typeof newOptions === 'function'
+      ? newOptions
+      : Vue.extend(newOptions)
+    makeOptionsHot(id, Component.options)
+  }
+  if (newTemplate) {
+    Component.options.template = newTemplate
+  }
+  // handle recursive lookup
+  if (Component.options.name) {
+    Component.options.components[Component.options.name] = Component
+  }
+  // reset constructor cached linker
+  Component.linker = null
+  // reload all views
+  record.views.forEach(function (view) {
+    updateView(view, Component)
+  })
+  // flush devtools
+  if (window.__VUE_DEVTOOLS_GLOBAL_HOOK__) {
+    window.__VUE_DEVTOOLS_GLOBAL_HOOK__.emit('flush')
+  }
+}
+
+/**
+ * Update a component view instance
+ *
+ * @param {Directive} view
+ * @param {Function} Component
+ */
+
+function updateView (view, Component) {
+  if (!view._bound) {
+    return
+  }
+  view.Component = Component
+  view.hotUpdating = true
+  // disable transitions
+  view.vm._isCompiled = false
+  // save state
+  var state = extractState(view.childVM)
+  // remount, make sure to disable keep-alive
+  var keepAlive = view.keepAlive
+  view.keepAlive = false
+  view.mountComponent()
+  view.keepAlive = keepAlive
+  // restore state
+  restoreState(view.childVM, state, true)
+  // re-eanble transitions
+  view.vm._isCompiled = true
+  view.hotUpdating = false
+}
+
+/**
+ * Extract state from a Vue instance.
+ *
+ * @param {Vue} vm
+ * @return {Object}
+ */
+
+function extractState (vm) {
+  return {
+    cid: vm.constructor.cid,
+    data: vm.$data,
+    children: vm.$children.map(extractState)
+  }
+}
+
+/**
+ * Restore state to a reloaded Vue instance.
+ *
+ * @param {Vue} vm
+ * @param {Object} state
+ */
+
+function restoreState (vm, state, isRoot) {
+  var oldAsyncConfig
+  if (isRoot) {
+    // set Vue into sync mode during state rehydration
+    oldAsyncConfig = Vue.config.async
+    Vue.config.async = false
+  }
+  // actual restore
+  if (isRoot || !vm._props) {
+    vm.$data = state.data
+  } else {
+    Object.keys(state.data).forEach(function (key) {
+      if (!vm._props[key]) {
+        // for non-root, only restore non-props fields
+        vm.$data[key] = state.data[key]
+      }
+    })
+  }
+  // verify child consistency
+  var hasSameChildren = vm.$children.every(function (c, i) {
+    return state.children[i] && state.children[i].cid === c.constructor.cid
+  })
+  if (hasSameChildren) {
+    // rehydrate children
+    vm.$children.forEach(function (c, i) {
+      restoreState(c, state.children[i])
+    })
+  }
+  if (isRoot) {
+    Vue.config.async = oldAsyncConfig
+  }
+}
+
+function format (id) {
+  return id.match(/[^\/]+\.vue$/)[0]
+}
+
+},{}],3:[function(require,module,exports){
 /**
  * Before Interceptor.
  */
@@ -111,7 +411,7 @@ module.exports = {
 
 };
 
-},{"../util":25}],3:[function(require,module,exports){
+},{"../util":26}],4:[function(require,module,exports){
 /**
  * Base client.
  */
@@ -178,7 +478,7 @@ function parseHeaders(str) {
     return headers;
 }
 
-},{"../../promise":18,"../../util":25,"./xhr":6}],4:[function(require,module,exports){
+},{"../../promise":19,"../../util":26,"./xhr":7}],5:[function(require,module,exports){
 /**
  * JSONP client.
  */
@@ -228,7 +528,7 @@ module.exports = function (request) {
     });
 };
 
-},{"../../promise":18,"../../util":25}],5:[function(require,module,exports){
+},{"../../promise":19,"../../util":26}],6:[function(require,module,exports){
 /**
  * XDomain client (Internet Explorer).
  */
@@ -267,7 +567,7 @@ module.exports = function (request) {
     });
 };
 
-},{"../../promise":18,"../../util":25}],6:[function(require,module,exports){
+},{"../../promise":19,"../../util":26}],7:[function(require,module,exports){
 /**
  * XMLHttp client.
  */
@@ -319,7 +619,7 @@ module.exports = function (request) {
     });
 };
 
-},{"../../promise":18,"../../util":25}],7:[function(require,module,exports){
+},{"../../promise":19,"../../util":26}],8:[function(require,module,exports){
 /**
  * CORS Interceptor.
  */
@@ -358,7 +658,7 @@ function crossOrigin(request) {
     return (requestUrl.protocol !== originUrl.protocol || requestUrl.host !== originUrl.host);
 }
 
-},{"../util":25,"./client/xdr":5}],8:[function(require,module,exports){
+},{"../util":26,"./client/xdr":6}],9:[function(require,module,exports){
 /**
  * Header Interceptor.
  */
@@ -386,7 +686,7 @@ module.exports = {
 
 };
 
-},{"../util":25}],9:[function(require,module,exports){
+},{"../util":26}],10:[function(require,module,exports){
 /**
  * Service for sending network requests.
  */
@@ -486,7 +786,7 @@ Http.headers = {
 
 module.exports = _.http = Http;
 
-},{"../promise":18,"../util":25,"./before":2,"./client":3,"./cors":7,"./header":8,"./interceptor":10,"./jsonp":11,"./method":12,"./mime":13,"./timeout":14}],10:[function(require,module,exports){
+},{"../promise":19,"../util":26,"./before":3,"./client":4,"./cors":8,"./header":9,"./interceptor":11,"./jsonp":12,"./method":13,"./mime":14,"./timeout":15}],11:[function(require,module,exports){
 /**
  * Interceptor factory.
  */
@@ -533,7 +833,7 @@ function when(value, fulfilled, rejected) {
     return promise.then(fulfilled, rejected);
 }
 
-},{"../promise":18,"../util":25}],11:[function(require,module,exports){
+},{"../promise":19,"../util":26}],12:[function(require,module,exports){
 /**
  * JSONP Interceptor.
  */
@@ -553,7 +853,7 @@ module.exports = {
 
 };
 
-},{"./client/jsonp":4}],12:[function(require,module,exports){
+},{"./client/jsonp":5}],13:[function(require,module,exports){
 /**
  * HTTP method override Interceptor.
  */
@@ -572,7 +872,7 @@ module.exports = {
 
 };
 
-},{}],13:[function(require,module,exports){
+},{}],14:[function(require,module,exports){
 /**
  * Mime Interceptor.
  */
@@ -610,7 +910,7 @@ module.exports = {
 
 };
 
-},{"../util":25}],14:[function(require,module,exports){
+},{"../util":26}],15:[function(require,module,exports){
 /**
  * Timeout Interceptor.
  */
@@ -642,7 +942,7 @@ module.exports = function () {
     };
 };
 
-},{}],15:[function(require,module,exports){
+},{}],16:[function(require,module,exports){
 /**
  * Install plugin.
  */
@@ -697,7 +997,7 @@ if (window.Vue) {
 
 module.exports = install;
 
-},{"./http":9,"./promise":18,"./resource":19,"./url":20,"./util":25}],16:[function(require,module,exports){
+},{"./http":10,"./promise":19,"./resource":20,"./url":21,"./util":26}],17:[function(require,module,exports){
 /**
  * Promises/A+ polyfill v1.1.4 (https://github.com/bramstein/promis)
  */
@@ -878,7 +1178,7 @@ p.catch = function (onRejected) {
 
 module.exports = Promise;
 
-},{"../util":25}],17:[function(require,module,exports){
+},{"../util":26}],18:[function(require,module,exports){
 /**
  * URL Template v2.0.6 (https://github.com/bramstein/url-template)
  */
@@ -1030,7 +1330,7 @@ exports.encodeReserved = function (str) {
     }).join('');
 };
 
-},{}],18:[function(require,module,exports){
+},{}],19:[function(require,module,exports){
 /**
  * Promise adapter.
  */
@@ -1141,7 +1441,7 @@ p.always = function (callback) {
 
 module.exports = Promise;
 
-},{"./lib/promise":16,"./util":25}],19:[function(require,module,exports){
+},{"./lib/promise":17,"./util":26}],20:[function(require,module,exports){
 /**
  * Service for interacting with RESTful services.
  */
@@ -1253,7 +1553,7 @@ Resource.actions = {
 
 module.exports = _.resource = Resource;
 
-},{"./util":25}],20:[function(require,module,exports){
+},{"./util":26}],21:[function(require,module,exports){
 /**
  * Service for URL templating.
  */
@@ -1385,7 +1685,7 @@ function serialize(params, obj, scope) {
 
 module.exports = _.url = Url;
 
-},{"../util":25,"./legacy":21,"./query":22,"./root":23,"./template":24}],21:[function(require,module,exports){
+},{"../util":26,"./legacy":22,"./query":23,"./root":24,"./template":25}],22:[function(require,module,exports){
 /**
  * Legacy Transform.
  */
@@ -1433,7 +1733,7 @@ function encodeUriQuery(value, spaces) {
         replace(/%20/g, (spaces ? '%20' : '+'));
 }
 
-},{"../util":25}],22:[function(require,module,exports){
+},{"../util":26}],23:[function(require,module,exports){
 /**
  * Query Parameter Transform.
  */
@@ -1459,7 +1759,7 @@ module.exports = function (options, next) {
     return url;
 };
 
-},{"../util":25}],23:[function(require,module,exports){
+},{"../util":26}],24:[function(require,module,exports){
 /**
  * Root Prefix Transform.
  */
@@ -1477,7 +1777,7 @@ module.exports = function (options, next) {
     return url;
 };
 
-},{"../util":25}],24:[function(require,module,exports){
+},{"../util":26}],25:[function(require,module,exports){
 /**
  * URL Template (RFC 6570) Transform.
  */
@@ -1495,7 +1795,7 @@ module.exports = function (options) {
     return url;
 };
 
-},{"../lib/url-template":17}],25:[function(require,module,exports){
+},{"../lib/url-template":18}],26:[function(require,module,exports){
 /**
  * Utility functions.
  */
@@ -1619,9 +1919,9 @@ function merge(target, source, deep) {
     }
 }
 
-},{}],26:[function(require,module,exports){
+},{}],27:[function(require,module,exports){
 /*!
- * vue-router v0.7.12
+ * vue-router v0.7.13
  * (c) 2016 Evan You
  * Released under the MIT License.
  */
@@ -3497,7 +3797,6 @@ function merge(target, source, deep) {
   function Link (Vue) {
     var _Vue$util = Vue.util;
     var _bind = _Vue$util.bind;
-    var getAttr = _Vue$util.getAttr;
     var isObject = _Vue$util.isObject;
     var addClass = _Vue$util.addClass;
     var removeClass = _Vue$util.removeClass;
@@ -3550,8 +3849,9 @@ function merge(target, source, deep) {
         // update things when the route changes
         this.unwatch = vm.$watch('$route', _bind(this.onRouteUpdate, this));
         // check v-link-active ids
-        var activeIds = getAttr(this.el, LINK_UPDATE);
+        var activeIds = this.el.getAttribute(LINK_UPDATE);
         if (activeIds) {
+          this.el.removeAttribute(LINK_UPDATE);
           this.activeIds = activeIds.split(',');
         }
         // no need to handle click if link expects to be opened
@@ -4329,10 +4629,10 @@ function merge(target, source, deep) {
   return Router;
 
 }));
-},{}],27:[function(require,module,exports){
+},{}],28:[function(require,module,exports){
 (function (process,global){
 /*!
- * Vue.js v1.0.17
+ * Vue.js v1.0.21
  * (c) 2016 Evan You
  * Released under the MIT License.
  */
@@ -4618,7 +4918,7 @@ function isPlainObject(obj) {
 var isArray = Array.isArray;
 
 /**
- * Define a non-enumerable property
+ * Define a property.
  *
  * @param {Object} obj
  * @param {String} key
@@ -4977,7 +5277,7 @@ function processFilterArg(arg) {
  *   ]
  * }
  *
- * @param {String} str
+ * @param {String} s
  * @return {Object}
  */
 
@@ -5069,7 +5369,7 @@ function compileRegex() {
   var close = escapeRegex(config.delimiters[1]);
   var unsafeOpen = escapeRegex(config.unsafeDelimiters[0]);
   var unsafeClose = escapeRegex(config.unsafeDelimiters[1]);
-  tagRE = new RegExp(unsafeOpen + '(.+?)' + unsafeClose + '|' + open + '(.+?)' + close, 'g');
+  tagRE = new RegExp(unsafeOpen + '((?:.|\\n)+?)' + unsafeClose + '|' + open + '((?:.|\\n)+?)' + close, 'g');
   htmlRE = new RegExp('^' + unsafeOpen + '.*' + unsafeClose + '$');
   // reset cache
   cache = new Cache(1000);
@@ -5094,7 +5394,6 @@ function parseText(text) {
   if (hit) {
     return hit;
   }
-  text = text.replace(/\n/g, '');
   if (!tagRE.test(text)) {
     return null;
   }
@@ -5239,6 +5538,13 @@ var config = Object.defineProperties({
   warnExpressionErrors: true,
 
   /**
+   * Whether to allow devtools inspection.
+   * Disabled by default in production builds.
+   */
+
+  devtools: process.env.NODE_ENV !== 'production',
+
+  /**
    * Internal flag to indicate the delimiters have been
    * changed.
    *
@@ -5303,22 +5609,21 @@ var config = Object.defineProperties({
 });
 
 var warn = undefined;
+var formatComponentName = undefined;
 
 if (process.env.NODE_ENV !== 'production') {
   (function () {
     var hasConsole = typeof console !== 'undefined';
-    warn = function (msg, e) {
-      if (hasConsole && (!config.silent || config.debug)) {
-        console.warn('[Vue warn]: ' + msg);
-        /* istanbul ignore if */
-        if (config.debug) {
-          if (e) {
-            throw e;
-          } else {
-            console.warn(new Error('Warning Stack Trace').stack);
-          }
-        }
+
+    warn = function (msg, vm) {
+      if (hasConsole && !config.silent) {
+        console.error('[Vue warn]: ' + msg + (vm ? formatComponentName(vm) : ''));
       }
+    };
+
+    formatComponentName = function (vm) {
+      var name = vm._isVue ? vm.$options.name : vm.name;
+      return name ? ' (found in component: <' + hyphenate(name) + '>)' : '';
     };
   })();
 }
@@ -5576,6 +5881,22 @@ function off(el, event, cb) {
 }
 
 /**
+ * For IE9 compat: when both class and :class are present
+ * getAttribute('class') returns wrong value...
+ *
+ * @param {Element} el
+ * @return {String}
+ */
+
+function getClass(el) {
+  var classname = el.className;
+  if (typeof classname === 'object') {
+    classname = classname.baseVal || '';
+  }
+  return classname;
+}
+
+/**
  * In IE9, setAttribute('class') will result in empty class
  * if the element also has the :class attribute; However in
  * PhantomJS, setting `className` does not work on SVG elements...
@@ -5605,7 +5926,7 @@ function addClass(el, cls) {
   if (el.classList) {
     el.classList.add(cls);
   } else {
-    var cur = ' ' + (el.getAttribute('class') || '') + ' ';
+    var cur = ' ' + getClass(el) + ' ';
     if (cur.indexOf(' ' + cls + ' ') < 0) {
       setClass(el, (cur + cls).trim());
     }
@@ -5623,7 +5944,7 @@ function removeClass(el, cls) {
   if (el.classList) {
     el.classList.remove(cls);
   } else {
-    var cur = ' ' + (el.getAttribute('class') || '') + ' ';
+    var cur = ' ' + getClass(el) + ' ';
     var tar = ' ' + cls + ' ';
     while (cur.indexOf(tar) >= 0) {
       cur = cur.replace(tar, ' ');
@@ -5822,8 +6143,8 @@ function getOuterHTML(el) {
   }
 }
 
-var commonTagRE = /^(div|p|span|img|a|b|i|br|ul|ol|li|h1|h2|h3|h4|h5|h6|code|pre|table|th|td|tr|form|label|input|select|option|nav|article|section|header|footer)$/;
-var reservedTagRE = /^(slot|partial|component)$/;
+var commonTagRE = /^(div|p|span|img|a|b|i|br|ul|ol|li|h1|h2|h3|h4|h5|h6|code|pre|table|th|td|tr|form|label|input|select|option|nav|article|section|header|footer)$/i;
+var reservedTagRE = /^(slot|partial|component)$/i;
 
 var isUnknownElement = undefined;
 if (process.env.NODE_ENV !== 'production') {
@@ -5895,100 +6216,6 @@ function getIsBinding(el) {
 }
 
 /**
- * Set a prop's initial value on a vm and its data object.
- *
- * @param {Vue} vm
- * @param {Object} prop
- * @param {*} value
- */
-
-function initProp(vm, prop, value) {
-  var key = prop.path;
-  value = coerceProp(prop, value);
-  vm[key] = vm._data[key] = assertProp(prop, value) ? value : undefined;
-}
-
-/**
- * Assert whether a prop is valid.
- *
- * @param {Object} prop
- * @param {*} value
- */
-
-function assertProp(prop, value) {
-  if (!prop.options.required && ( // non-required
-  prop.raw === null || // abscent
-  value == null) // null or undefined
-  ) {
-      return true;
-    }
-  var options = prop.options;
-  var type = options.type;
-  var valid = true;
-  var expectedType;
-  if (type) {
-    if (type === String) {
-      expectedType = 'string';
-      valid = typeof value === expectedType;
-    } else if (type === Number) {
-      expectedType = 'number';
-      valid = typeof value === 'number';
-    } else if (type === Boolean) {
-      expectedType = 'boolean';
-      valid = typeof value === 'boolean';
-    } else if (type === Function) {
-      expectedType = 'function';
-      valid = typeof value === 'function';
-    } else if (type === Object) {
-      expectedType = 'object';
-      valid = isPlainObject(value);
-    } else if (type === Array) {
-      expectedType = 'array';
-      valid = isArray(value);
-    } else {
-      valid = value instanceof type;
-    }
-  }
-  if (!valid) {
-    process.env.NODE_ENV !== 'production' && warn('Invalid prop: type check failed for ' + prop.path + '="' + prop.raw + '".' + ' Expected ' + formatType(expectedType) + ', got ' + formatValue(value) + '.');
-    return false;
-  }
-  var validator = options.validator;
-  if (validator) {
-    if (!validator(value)) {
-      process.env.NODE_ENV !== 'production' && warn('Invalid prop: custom validator check failed for ' + prop.path + '="' + prop.raw + '"');
-      return false;
-    }
-  }
-  return true;
-}
-
-/**
- * Force parsing value with coerce option.
- *
- * @param {*} value
- * @param {Object} options
- * @return {*}
- */
-
-function coerceProp(prop, value) {
-  var coerce = prop.options.coerce;
-  if (!coerce) {
-    return value;
-  }
-  // coerce is a function
-  return coerce(value);
-}
-
-function formatType(val) {
-  return val ? val.charAt(0).toUpperCase() + val.slice(1) : 'custom type';
-}
-
-function formatValue(val) {
-  return Object.prototype.toString.call(val).slice(8, -1);
-}
-
-/**
  * Option overwriting strategies are functions that handle
  * how to merge a parent option value and a child option
  * value into the final value.
@@ -6031,7 +6258,7 @@ strats.data = function (parentVal, childVal, vm) {
       return parentVal;
     }
     if (typeof childVal !== 'function') {
-      process.env.NODE_ENV !== 'production' && warn('The "data" option should be a function ' + 'that returns a per-instance value in component ' + 'definitions.');
+      process.env.NODE_ENV !== 'production' && warn('The "data" option should be a function ' + 'that returns a per-instance value in component ' + 'definitions.', vm);
       return parentVal;
     }
     if (!parentVal) {
@@ -6065,7 +6292,7 @@ strats.data = function (parentVal, childVal, vm) {
 
 strats.el = function (parentVal, childVal, vm) {
   if (!vm && childVal && typeof childVal !== 'function') {
-    process.env.NODE_ENV !== 'production' && warn('The "el" option should be a function ' + 'that returns a per-instance value in component ' + 'definitions.');
+    process.env.NODE_ENV !== 'production' && warn('The "el" option should be a function ' + 'that returns a per-instance value in component ' + 'definitions.', vm);
     return;
   }
   var ret = childVal || parentVal;
@@ -6079,15 +6306,6 @@ strats.el = function (parentVal, childVal, vm) {
 
 strats.init = strats.created = strats.ready = strats.attached = strats.detached = strats.beforeCompile = strats.compiled = strats.beforeDestroy = strats.destroyed = strats.activate = function (parentVal, childVal) {
   return childVal ? parentVal ? parentVal.concat(childVal) : isArray(childVal) ? childVal : [childVal] : parentVal;
-};
-
-/**
- * 0.11 deprecation warning
- */
-
-strats.paramAttributes = function () {
-  /* istanbul ignore next */
-  process.env.NODE_ENV !== 'production' && warn('"paramAttributes" option has been deprecated in 0.12. ' + 'Use "props" instead.');
 };
 
 /**
@@ -6288,31 +6506,26 @@ function mergeOptions(parent, child, vm) {
  * @param {Object} options
  * @param {String} type
  * @param {String} id
+ * @param {Boolean} warnMissing
  * @return {Object|Function}
  */
 
-function resolveAsset(options, type, id) {
+function resolveAsset(options, type, id, warnMissing) {
   /* istanbul ignore if */
   if (typeof id !== 'string') {
     return;
   }
   var assets = options[type];
   var camelizedId;
-  return assets[id] ||
+  var res = assets[id] ||
   // camelCase ID
   assets[camelizedId = camelize(id)] ||
   // Pascal Case ID
   assets[camelizedId.charAt(0).toUpperCase() + camelizedId.slice(1)];
-}
-
-/**
- * Assert asset exists
- */
-
-function assertAsset(val, type, id) {
-  if (!val) {
-    process.env.NODE_ENV !== 'production' && warn('Failed to resolve ' + type + ': ' + id);
+  if (process.env.NODE_ENV !== 'production' && warnMissing && !res) {
+    warn('Failed to resolve ' + type.slice(0, -1) + ': ' + id, options);
   }
+  return res;
 }
 
 var uid$1 = 0;
@@ -6429,10 +6642,9 @@ def(arrayProto, '$set', function $set(index, val) {
 });
 
 /**
- * Convenience method to remove the element at given index.
+ * Convenience method to remove the element at given index or target element reference.
  *
- * @param {Number} index
- * @param {*} val
+ * @param {*} item
  */
 
 def(arrayProto, '$remove', function $remove(item) {
@@ -6445,6 +6657,24 @@ def(arrayProto, '$remove', function $remove(item) {
 });
 
 var arrayKeys = Object.getOwnPropertyNames(arrayMethods);
+
+/**
+ * By default, when a reactive property is set, the new value is
+ * also converted to become reactive. However in certain cases, e.g.
+ * v-for scope alias and props, we don't want to force conversion
+ * because the value may be a nested value under a frozen data structure.
+ *
+ * So whenever we want to set a reactive property without forcing
+ * conversion on the new value, we wrap that call inside this function.
+ */
+
+var shouldConvert = true;
+
+function withoutConversion(fn) {
+  shouldConvert = false;
+  fn();
+  shouldConvert = true;
+}
 
 /**
  * Observer class that are attached to each observed
@@ -6541,7 +6771,7 @@ Observer.prototype.removeVm = function (vm) {
  * the prototype chain using __proto__
  *
  * @param {Object|Array} target
- * @param {Object} proto
+ * @param {Object} src
  */
 
 function protoAugment(target, src) {
@@ -6583,7 +6813,7 @@ function observe(value, vm) {
   var ob;
   if (hasOwn(value, '__ob__') && value.__ob__ instanceof Observer) {
     ob = value.__ob__;
-  } else if ((isArray(value) || isPlainObject(value)) && Object.isExtensible(value) && !value._isVue) {
+  } else if (shouldConvert && (isArray(value) || isPlainObject(value)) && Object.isExtensible(value) && !value._isVue) {
     ob = new Observer(value);
   }
   if (ob && vm) {
@@ -6711,11 +6941,7 @@ var util = Object.freeze({
 	getOuterHTML: getOuterHTML,
 	mergeOptions: mergeOptions,
 	resolveAsset: resolveAsset,
-	assertAsset: assertAsset,
 	checkComponentAttr: checkComponentAttr,
-	initProp: initProp,
-	assertProp: assertProp,
-	coerceProp: coerceProp,
 	commonTagRE: commonTagRE,
 	reservedTagRE: reservedTagRE,
 	get warn () { return warn; }
@@ -6794,13 +7020,6 @@ function initMixin (Vue) {
       this.$parent.$children.push(this);
     }
 
-    // save raw constructor data before merge
-    // so that we know which properties are provided at
-    // instantiation.
-    if (process.env.NODE_ENV !== 'production') {
-      this._runtimeData = options.data;
-    }
-
     // merge options.
     options = this.$options = mergeOptions(this.constructor.options, options, this);
 
@@ -6810,6 +7029,11 @@ function initMixin (Vue) {
     // initialize data as empty object.
     // it will be filled up in _initScope().
     this._data = {};
+
+    // save raw constructor data before merge
+    // so that we know which properties are provided at
+    // instantiation.
+    this._runtimeData = options.data;
 
     // call init hook
     this._callHook('init');
@@ -7103,8 +7327,8 @@ function getPath(obj, path) {
 
 var warnNonExistent;
 if (process.env.NODE_ENV !== 'production') {
-  warnNonExistent = function (path) {
-    warn('You are setting a non-existent path "' + path.raw + '" ' + 'on a vm instance. Consider pre-initializing the property ' + 'with the "data" option for more reliable reactivity ' + 'and better performance.');
+  warnNonExistent = function (path, vm) {
+    warn('You are setting a non-existent path "' + path.raw + '" ' + 'on a vm instance. Consider pre-initializing the property ' + 'with the "data" option for more reliable reactivity ' + 'and better performance.', vm);
   };
 }
 
@@ -7136,7 +7360,7 @@ function setPath(obj, path, val) {
       if (!isObject(obj)) {
         obj = {};
         if (process.env.NODE_ENV !== 'production' && last._isVue) {
-          warnNonExistent(path);
+          warnNonExistent(path, last);
         }
         set(last, key, obj);
       }
@@ -7147,7 +7371,7 @@ function setPath(obj, path, val) {
         obj[key] = val;
       } else {
         if (process.env.NODE_ENV !== 'production' && obj._isVue) {
-          warnNonExistent(path);
+          warnNonExistent(path, obj);
         }
         set(obj, key, val);
       }
@@ -7168,7 +7392,7 @@ var allowedKeywords = 'Math,Date,this,true,false,null,undefined,Infinity,NaN,' +
 var allowedKeywordsRE = new RegExp('^(' + allowedKeywords.replace(/,/g, '\\b|') + '\\b)');
 
 // keywords that don't make sense inside expressions
-var improperKeywords = 'break,case,class,catch,const,continue,debugger,default,' + 'delete,do,else,export,extends,finally,for,function,if,' + 'import,in,instanceof,let,return,super,switch,throw,try,' + 'var,while,with,yield,enum,await,implements,package,' + 'proctected,static,interface,private,public';
+var improperKeywords = 'break,case,class,catch,const,continue,debugger,default,' + 'delete,do,else,export,extends,finally,for,function,if,' + 'import,in,instanceof,let,return,super,switch,throw,try,' + 'var,while,with,yield,enum,await,implements,package,' + 'protected,static,interface,private,public';
 var improperKeywordsRE = new RegExp('^(' + improperKeywords.replace(/,/g, '\\b|') + '\\b)');
 
 var wsRE = /\s/g;
@@ -7359,6 +7583,8 @@ var expression = Object.freeze({
 // before user watchers so that when user watchers are
 // triggered, the DOM would have already been in updated
 // state.
+
+var queueIndex;
 var queue = [];
 var userQueue = [];
 var has = {};
@@ -7388,7 +7614,7 @@ function flushBatcherQueue() {
   runBatcherQueue(userQueue);
   // dev tool hook
   /* istanbul ignore if */
-  if (devtools) {
+  if (devtools && config.devtools) {
     devtools.emit('flush');
   }
   resetBatcherState();
@@ -7403,8 +7629,8 @@ function flushBatcherQueue() {
 function runBatcherQueue(queue) {
   // do not cache length because more watchers might be pushed
   // as we run existing watchers
-  for (var i = 0; i < queue.length; i++) {
-    var watcher = queue[i];
+  for (queueIndex = 0; queueIndex < queue.length; queueIndex++) {
+    var watcher = queue[queueIndex];
     var id = watcher.id;
     has[id] = null;
     watcher.run();
@@ -7412,8 +7638,8 @@ function runBatcherQueue(queue) {
     if (process.env.NODE_ENV !== 'production' && has[id] != null) {
       circular[id] = (circular[id] || 0) + 1;
       if (circular[id] > config._maxUpdateCount) {
-        queue.splice(has[id], 1);
-        warn('You may have an infinite update loop for watcher ' + 'with expression: ' + watcher.expression);
+        warn('You may have an infinite update loop for watcher ' + 'with expression "' + watcher.expression + '"', watcher.vm);
+        break;
       }
     }
   }
@@ -7433,20 +7659,20 @@ function runBatcherQueue(queue) {
 function pushWatcher(watcher) {
   var id = watcher.id;
   if (has[id] == null) {
-    // if an internal watcher is pushed, but the internal
-    // queue is already depleted, we run it immediately.
     if (internalQueueDepleted && !watcher.user) {
-      watcher.run();
-      return;
-    }
-    // push watcher into appropriate queue
-    var q = watcher.user ? userQueue : queue;
-    has[id] = q.length;
-    q.push(watcher);
-    // queue the flush
-    if (!waiting) {
-      waiting = true;
-      nextTick(flushBatcherQueue);
+      // an internal watcher triggered by a user watcher...
+      // let's run it immediately after current user watcher is done.
+      userQueue.splice(queueIndex + 1, 0, watcher);
+    } else {
+      // push watcher into appropriate queue
+      var q = watcher.user ? userQueue : queue;
+      has[id] = q.length;
+      q.push(watcher);
+      // queue the flush
+      if (!waiting) {
+        waiting = true;
+        nextTick(flushBatcherQueue);
+      }
     }
   }
 }
@@ -7459,7 +7685,7 @@ var uid$2 = 0;
  * This is used for both the $watch() api and directives.
  *
  * @param {Vue} vm
- * @param {String} expression
+ * @param {String|Function} expOrFn
  * @param {Function} cb
  * @param {Object} options
  *                 - {Array} filters
@@ -7480,13 +7706,15 @@ function Watcher(vm, expOrFn, cb, options) {
   var isFn = typeof expOrFn === 'function';
   this.vm = vm;
   vm._watchers.push(this);
-  this.expression = isFn ? expOrFn.toString() : expOrFn;
+  this.expression = expOrFn;
   this.cb = cb;
   this.id = ++uid$2; // uid for batching
   this.active = true;
   this.dirty = this.lazy; // for lazy watchers
-  this.deps = Object.create(null);
-  this.newDeps = null;
+  this.deps = [];
+  this.newDeps = [];
+  this.depIds = Object.create(null);
+  this.newDepIds = null;
   this.prevError = null; // for async error stacks
   // parse expression for getter/setter
   if (isFn) {
@@ -7504,23 +7732,6 @@ function Watcher(vm, expOrFn, cb, options) {
 }
 
 /**
- * Add a dependency to this directive.
- *
- * @param {Dep} dep
- */
-
-Watcher.prototype.addDep = function (dep) {
-  var id = dep.id;
-  if (!this.newDeps[id]) {
-    this.newDeps[id] = dep;
-    if (!this.deps[id]) {
-      this.deps[id] = dep;
-      dep.addSub(this);
-    }
-  }
-};
-
-/**
  * Evaluate the getter, and re-collect dependencies.
  */
 
@@ -7532,7 +7743,7 @@ Watcher.prototype.get = function () {
     value = this.getter.call(scope, scope);
   } catch (e) {
     if (process.env.NODE_ENV !== 'production' && config.warnExpressionErrors) {
-      warn('Error when evaluating expression "' + this.expression + '". ' + (config.debug ? '' : 'Turn on debug mode to see stack trace.'), e);
+      warn('Error when evaluating expression ' + '"' + this.expression + '": ' + e.toString(), this.vm);
     }
   }
   // "touch" every property so they are all tracked as
@@ -7568,14 +7779,14 @@ Watcher.prototype.set = function (value) {
     this.setter.call(scope, scope, value);
   } catch (e) {
     if (process.env.NODE_ENV !== 'production' && config.warnExpressionErrors) {
-      warn('Error when evaluating setter "' + this.expression + '"', e);
+      warn('Error when evaluating setter ' + '"' + this.expression + '": ' + e.toString(), this.vm);
     }
   }
   // two-way sync for v-for alias
   var forContext = scope.$forContext;
   if (forContext && forContext.alias === this.expression) {
     if (forContext.filters) {
-      process.env.NODE_ENV !== 'production' && warn('It seems you are using two-way binding on ' + 'a v-for alias (' + this.expression + '), and the ' + 'v-for has filters. This will not work properly. ' + 'Either remove the filters or use an array of ' + 'objects and bind to object properties instead.');
+      process.env.NODE_ENV !== 'production' && warn('It seems you are using two-way binding on ' + 'a v-for alias (' + this.expression + '), and the ' + 'v-for has filters. This will not work properly. ' + 'Either remove the filters or use an array of ' + 'objects and bind to object properties instead.', this.vm);
       return;
     }
     forContext._withLock(function () {
@@ -7595,7 +7806,25 @@ Watcher.prototype.set = function (value) {
 
 Watcher.prototype.beforeGet = function () {
   Dep.target = this;
-  this.newDeps = Object.create(null);
+  this.newDepIds = Object.create(null);
+  this.newDeps.length = 0;
+};
+
+/**
+ * Add a dependency to this directive.
+ *
+ * @param {Dep} dep
+ */
+
+Watcher.prototype.addDep = function (dep) {
+  var id = dep.id;
+  if (!this.newDepIds[id]) {
+    this.newDepIds[id] = true;
+    this.newDeps.push(dep);
+    if (!this.depIds[id]) {
+      dep.addSub(this);
+    }
+  }
 };
 
 /**
@@ -7604,15 +7833,17 @@ Watcher.prototype.beforeGet = function () {
 
 Watcher.prototype.afterGet = function () {
   Dep.target = null;
-  var ids = Object.keys(this.deps);
-  var i = ids.length;
+  var i = this.deps.length;
   while (i--) {
-    var id = ids[i];
-    if (!this.newDeps[id]) {
-      this.deps[id].removeSub(this);
+    var dep = this.deps[i];
+    if (!this.newDepIds[dep.id]) {
+      dep.removeSub(this);
     }
   }
+  this.depIds = this.newDepIds;
+  var tmp = this.deps;
   this.deps = this.newDeps;
+  this.newDeps = tmp;
 };
 
 /**
@@ -7700,10 +7931,9 @@ Watcher.prototype.evaluate = function () {
  */
 
 Watcher.prototype.depend = function () {
-  var depIds = Object.keys(this.deps);
-  var i = depIds.length;
+  var i = this.deps.length;
   while (i--) {
-    this.deps[depIds[i]].depend();
+    this.deps[i].depend();
   }
 };
 
@@ -7720,10 +7950,9 @@ Watcher.prototype.teardown = function () {
     if (!this.vm._isBeingDestroyed && !this.vm._vForRemoving) {
       this.vm._watchers.$remove(this);
     }
-    var depIds = Object.keys(this.deps);
-    var i = depIds.length;
+    var i = this.deps.length;
     while (i--) {
-      this.deps[depIds[i]].removeSub(this);
+      this.deps[i].removeSub(this);
     }
     this.active = false;
     this.vm = this.cb = this.value = null;
@@ -7791,7 +8020,7 @@ function isRealTemplate(node) {
   return isTemplate(node) && isFragment(node.content);
 }
 
-var tagRE$1 = /<([\w:]+)/;
+var tagRE$1 = /<([\w:-]+)/;
 var entityRE = /&#?\w+?;/;
 
 /**
@@ -7913,6 +8142,7 @@ var hasTextareaCloneBug = (function () {
  */
 
 function cloneNode(node) {
+  /* istanbul ignore if */
   if (!node.querySelectorAll) {
     return node.cloneNode();
   }
@@ -8057,6 +8287,7 @@ var html = {
  * @param {DocumentFragment} frag
  * @param {Vue} [host]
  * @param {Object} [scope]
+ * @param {Fragment} [parentFrag]
  */
 function Fragment(linker, vm, frag, host, scope, parentFrag) {
   this.children = [];
@@ -8222,7 +8453,7 @@ Fragment.prototype.destroy = function () {
  */
 
 function attach(child) {
-  if (!child._isAttached) {
+  if (!child._isAttached && inDoc(child.$el)) {
     child._callHook('attached');
   }
 }
@@ -8234,7 +8465,7 @@ function attach(child) {
  */
 
 function detach(child) {
-  if (child._isAttached) {
+  if (child._isAttached && !inDoc(child.$el)) {
     child._callHook('detached');
   }
 }
@@ -8295,15 +8526,16 @@ var TRANSITION = 1100;
 var EL = 1500;
 var COMPONENT = 1500;
 var PARTIAL = 1750;
-var FOR = 2000;
-var IF = 2000;
-var SLOT = 2100;
+var IF = 2100;
+var FOR = 2200;
+var SLOT = 2300;
 
 var uid$3 = 0;
 
 var vFor = {
 
   priority: FOR,
+  terminal: true,
 
   params: ['track-by', 'stagger', 'enter-stagger', 'leave-stagger'],
 
@@ -8322,7 +8554,7 @@ var vFor = {
     }
 
     if (!this.alias) {
-      process.env.NODE_ENV !== 'production' && warn('Alias is required in v-for.');
+      process.env.NODE_ENV !== 'production' && warn('Invalid v-for expression "' + this.descriptor.raw + '": ' + 'alias is required.', this.vm);
       return;
     }
 
@@ -8413,7 +8645,9 @@ var vFor = {
         // update data for track-by, object repeat &
         // primitive values.
         if (trackByKey || convertedFromObject || primitive) {
-          frag.scope[alias] = value;
+          withoutConversion(function () {
+            frag.scope[alias] = value;
+          });
         }
       } else {
         // new isntance
@@ -8503,7 +8737,11 @@ var vFor = {
     // for two-way binding on alias
     scope.$forContext = this;
     // define scope properties
-    defineReactive(scope, alias, value);
+    // important: define the scope alias without forced conversion
+    // so that frozen data structures remain non-reactive.
+    withoutConversion(function () {
+      defineReactive(scope, alias, value);
+    });
     defineReactive(scope, '$index', index);
     if (key) {
       defineReactive(scope, '$key', key);
@@ -8658,7 +8896,7 @@ var vFor = {
     var primitive = !isObject(value);
     var id;
     if (key || trackByKey || primitive) {
-      id = trackByKey ? trackByKey === '$index' ? index : value[trackByKey] : key || value;
+      id = trackByKey ? trackByKey === '$index' ? index : getPath(value, trackByKey) : key || value;
       if (!cache[id]) {
         cache[id] = frag;
       } else if (trackByKey !== '$index') {
@@ -8693,7 +8931,7 @@ var vFor = {
     var primitive = !isObject(value);
     var frag;
     if (key || trackByKey || primitive) {
-      var id = trackByKey ? trackByKey === '$index' ? index : value[trackByKey] : key || value;
+      var id = trackByKey ? trackByKey === '$index' ? index : getPath(value, trackByKey) : key || value;
       frag = this.cache[id];
     } else {
       frag = value[this.id];
@@ -8720,7 +8958,7 @@ var vFor = {
     var key = hasOwn(scope, '$key') && scope.$key;
     var primitive = !isObject(value);
     if (trackByKey || key || primitive) {
-      var id = trackByKey ? trackByKey === '$index' ? index : value[trackByKey] : key || value;
+      var id = trackByKey ? trackByKey === '$index' ? index : getPath(value, trackByKey) : key || value;
       this.cache[id] = null;
     } else {
       value[this.id] = null;
@@ -8872,13 +9110,14 @@ function range(n) {
 
 if (process.env.NODE_ENV !== 'production') {
   vFor.warnDuplicate = function (value) {
-    warn('Duplicate value found in v-for="' + this.descriptor.raw + '": ' + JSON.stringify(value) + '. Use track-by="$index" if ' + 'you are expecting duplicate values.');
+    warn('Duplicate value found in v-for="' + this.descriptor.raw + '": ' + JSON.stringify(value) + '. Use track-by="$index" if ' + 'you are expecting duplicate values.', this.vm);
   };
 }
 
 var vIf = {
 
   priority: IF,
+  terminal: true,
 
   bind: function bind() {
     var el = this.el;
@@ -8887,14 +9126,13 @@ var vIf = {
       var next = el.nextElementSibling;
       if (next && getAttr(next, 'v-else') !== null) {
         remove(next);
-        this.elseFactory = new FragmentFactory(next._context || this.vm, next);
+        this.elseEl = next;
       }
       // check main block
       this.anchor = createAnchor('v-if');
       replace(el, this.anchor);
-      this.factory = new FragmentFactory(this.vm, el);
     } else {
-      process.env.NODE_ENV !== 'production' && warn('v-if="' + this.expression + '" cannot be ' + 'used on an instance root element.');
+      process.env.NODE_ENV !== 'production' && warn('v-if="' + this.expression + '" cannot be ' + 'used on an instance root element.', this.vm);
       this.invalid = true;
     }
   },
@@ -8915,6 +9153,10 @@ var vIf = {
       this.elseFrag.remove();
       this.elseFrag = null;
     }
+    // lazy init factory
+    if (!this.factory) {
+      this.factory = new FragmentFactory(this.vm, this.el);
+    }
     this.frag = this.factory.create(this._host, this._scope, this._frag);
     this.frag.before(this.anchor);
   },
@@ -8924,7 +9166,10 @@ var vIf = {
       this.frag.remove();
       this.frag = null;
     }
-    if (this.elseFactory && !this.elseFrag) {
+    if (this.elseEl && !this.elseFrag) {
+      if (!this.elseFactory) {
+        this.elseFactory = new FragmentFactory(this.elseEl._context || this.vm, this.elseEl);
+      }
       this.elseFrag = this.elseFactory.create(this._host, this._scope, this._frag);
       this.elseFrag.before(this.anchor);
     }
@@ -9013,6 +9258,10 @@ var text$2 = {
       });
       this.on('blur', function () {
         self.focused = false;
+        // do not sync value after fragment removal (#2017)
+        if (!self._frag || self._frag.inserted) {
+          self.rawListener();
+        }
       });
     }
 
@@ -9316,7 +9565,7 @@ var model = {
     // friendly warning...
     this.checkFilters();
     if (this.hasRead && !this.hasWrite) {
-      process.env.NODE_ENV !== 'production' && warn('It seems you are using a read-only filter with ' + 'v-model. You might want to use a two-way filter ' + 'to ensure correct behavior.');
+      process.env.NODE_ENV !== 'production' && warn('It seems you are using a read-only filter with ' + 'v-model="' + this.descriptor.raw + '". ' + 'You might want to use a two-way filter to ensure correct behavior.', this.vm);
     }
     var el = this.el;
     var tag = el.tagName;
@@ -9328,7 +9577,7 @@ var model = {
     } else if (tag === 'TEXTAREA') {
       handler = handlers.text;
     } else {
-      process.env.NODE_ENV !== 'production' && warn('v-model does not support element type: ' + tag);
+      process.env.NODE_ENV !== 'production' && warn('v-model does not support element type: ' + tag, this.vm);
       return;
     }
     el.__v_model = this;
@@ -9444,7 +9693,7 @@ var on$1 = {
     }
 
     if (typeof handler !== 'function') {
-      process.env.NODE_ENV !== 'production' && warn('v-on:' + this.arg + '="' + this.expression + '" expects a function value, ' + 'got ' + handler);
+      process.env.NODE_ENV !== 'production' && warn('v-on:' + this.arg + '="' + this.expression + '" expects a function value, ' + 'got ' + handler, this.vm);
       return;
     }
 
@@ -9460,7 +9709,7 @@ var on$1 = {
     }
     // key filter
     var keys = Object.keys(this.modifiers).filter(function (key) {
-      return key !== 'stop' && key !== 'prevent';
+      return key !== 'stop' && key !== 'prevent' && key !== 'self';
     });
     if (keys.length) {
       handler = keyFilter(handler, keys);
@@ -9537,11 +9786,17 @@ var style = {
     if (value) {
       var isImportant = importantRE.test(value) ? 'important' : '';
       if (isImportant) {
+        /* istanbul ignore if */
+        if (process.env.NODE_ENV !== 'production') {
+          warn('It\'s probably a bad idea to use !important with inline rules. ' + 'This feature will be deprecated in a future version of Vue.');
+        }
         value = value.replace(importantRE, '').trim();
+        this.el.style.setProperty(prop.kebab, value, isImportant);
+      } else {
+        this.el.style[prop.camel] = value;
       }
-      this.el.style.setProperty(prop, value, isImportant);
     } else {
-      this.el.style.removeProperty(prop);
+      this.el.style[prop.camel] = '';
     }
   }
 
@@ -9586,11 +9841,17 @@ function prefix(prop) {
   while (i--) {
     prefixed = camelPrefixes[i] + upper;
     if (prefixed in testEl.style) {
-      return prefixes[i] + prop;
+      return {
+        kebab: prefixes[i] + prop,
+        camel: prefixed
+      };
     }
   }
   if (camel in testEl.style) {
-    return prop;
+    return {
+      kebab: prop,
+      camel: camel
+    };
   }
 }
 
@@ -9637,7 +9898,7 @@ var bind$1 = {
 
       // only allow binding on native attributes
       if (disallowedInterpAttrRE.test(attr) || attr === 'name' && (tag === 'PARTIAL' || tag === 'SLOT')) {
-        process.env.NODE_ENV !== 'production' && warn(attr + '="' + descriptor.raw + '": ' + 'attribute interpolation is not allowed in Vue.js ' + 'directives and special attributes.');
+        process.env.NODE_ENV !== 'production' && warn(attr + '="' + descriptor.raw + '": ' + 'attribute interpolation is not allowed in Vue.js ' + 'directives and special attributes.', this.vm);
         this.el.removeAttribute(attr);
         this.invalid = true;
       }
@@ -9647,12 +9908,12 @@ var bind$1 = {
         var raw = attr + '="' + descriptor.raw + '": ';
         // warn src
         if (attr === 'src') {
-          warn(raw + 'interpolation in "src" attribute will cause ' + 'a 404 request. Use v-bind:src instead.');
+          warn(raw + 'interpolation in "src" attribute will cause ' + 'a 404 request. Use v-bind:src instead.', this.vm);
         }
 
         // warn style
         if (attr === 'style') {
-          warn(raw + 'interpolation in "style" attribute will cause ' + 'the attribute to be discarded in Internet Explorer. ' + 'Use v-bind:style instead.');
+          warn(raw + 'interpolation in "style" attribute will cause ' + 'the attribute to be discarded in Internet Explorer. ' + 'Use v-bind:style instead.', this.vm);
         }
       }
     }
@@ -9748,7 +10009,7 @@ var el = {
 
 var ref = {
   bind: function bind() {
-    process.env.NODE_ENV !== 'production' && warn('v-ref:' + this.arg + ' must be used on a child ' + 'component. Found on <' + this.el.tagName.toLowerCase() + '>.');
+    process.env.NODE_ENV !== 'production' && warn('v-ref:' + this.arg + ' must be used on a child ' + 'component. Found on <' + this.el.tagName.toLowerCase() + '>.', this.vm);
   }
 };
 
@@ -9794,52 +10055,83 @@ var vClass = {
 
   handleObject: function handleObject(value) {
     this.cleanup(value);
-    var keys = this.prevKeys = Object.keys(value);
-    for (var i = 0, l = keys.length; i < l; i++) {
-      var key = keys[i];
-      if (value[key]) {
-        addClass(this.el, key);
-      } else {
-        removeClass(this.el, key);
-      }
-    }
+    this.prevKeys = Object.keys(value);
+    setObjectClasses(this.el, value);
   },
 
   handleArray: function handleArray(value) {
     this.cleanup(value);
     for (var i = 0, l = value.length; i < l; i++) {
-      if (value[i]) {
-        addClass(this.el, value[i]);
+      var val = value[i];
+      if (val && isPlainObject(val)) {
+        setObjectClasses(this.el, val);
+      } else if (val && typeof val === 'string') {
+        addClass(this.el, val);
       }
     }
     this.prevKeys = value.slice();
   },
 
   cleanup: function cleanup(value) {
-    if (this.prevKeys) {
-      var i = this.prevKeys.length;
-      while (i--) {
-        var key = this.prevKeys[i];
-        if (key && (!value || !contains(value, key))) {
-          removeClass(this.el, key);
-        }
+    if (!this.prevKeys) return;
+
+    var i = this.prevKeys.length;
+    while (i--) {
+      var key = this.prevKeys[i];
+      if (!key) continue;
+
+      var keys = isPlainObject(key) ? Object.keys(key) : [key];
+      for (var j = 0, l = keys.length; j < l; j++) {
+        toggleClasses(this.el, keys[j], removeClass);
       }
     }
   }
 };
 
+function setObjectClasses(el, obj) {
+  var keys = Object.keys(obj);
+  for (var i = 0, l = keys.length; i < l; i++) {
+    var key = keys[i];
+    if (!obj[key]) continue;
+    toggleClasses(el, key, addClass);
+  }
+}
+
 function stringToObject(value) {
   var res = {};
   var keys = value.trim().split(/\s+/);
-  var i = keys.length;
-  while (i--) {
+  for (var i = 0, l = keys.length; i < l; i++) {
     res[keys[i]] = true;
   }
   return res;
 }
 
-function contains(value, key) {
-  return isArray(value) ? value.indexOf(key) > -1 : hasOwn(value, key);
+/**
+ * Add or remove a class/classes on an element
+ *
+ * @param {Element} el
+ * @param {String} key The class name. This may or may not
+ *                     contain a space character, in such a
+ *                     case we'll deal with multiple class
+ *                     names at once.
+ * @param {Function} fn
+ */
+
+function toggleClasses(el, key, fn) {
+  key = key.trim();
+
+  if (key.indexOf(' ') === -1) {
+    fn(el, key);
+    return;
+  }
+
+  // The key contains one or more space characters.
+  // Since a class name doesn't accept such characters, we
+  // treat it as multiple classes.
+  var keys = key.split(/\s+/);
+  for (var i = 0, l = keys.length; i < l; i++) {
+    fn(el, keys[i]);
+  }
 }
 
 var component = {
@@ -9938,16 +10230,19 @@ var component = {
   /**
    * Resolve the component constructor to use when creating
    * the child vm.
+   *
+   * @param {String|Function} value
+   * @param {Function} cb
    */
 
-  resolveComponent: function resolveComponent(id, cb) {
+  resolveComponent: function resolveComponent(value, cb) {
     var self = this;
     this.pendingComponentCb = cancellable(function (Component) {
-      self.ComponentName = Component.options.name || id;
+      self.ComponentName = Component.options.name || (typeof value === 'string' ? value : null);
       self.Component = Component;
       cb();
     });
-    this.vm._resolveComponent(id, this.pendingComponentCb);
+    this.vm._resolveComponent(value, this.pendingComponentCb);
   },
 
   /**
@@ -10054,7 +10349,7 @@ var component = {
       }
       /* istanbul ignore if */
       if (process.env.NODE_ENV !== 'production' && this.el.hasAttribute('transition') && child._isFragment) {
-        warn('Transitions will not work on a fragment instance. ' + 'Template: ' + child.$options.template);
+        warn('Transitions will not work on a fragment instance. ' + 'Template: ' + child.$options.template, child);
       }
       return child;
     }
@@ -10079,13 +10374,16 @@ var component = {
 
   unbuild: function unbuild(defer) {
     if (this.waitingFor) {
-      this.waitingFor.$destroy();
+      if (!this.keepAlive) {
+        this.waitingFor.$destroy();
+      }
       this.waitingFor = null;
     }
     var child = this.childVM;
     if (!child || this.keepAlive) {
       if (child) {
         // remove ref
+        child._inactive = true;
         child._updateRef(true);
       }
       return;
@@ -10138,10 +10436,8 @@ var component = {
     var self = this;
     var current = this.childVM;
     // for devtool inspection
-    if (process.env.NODE_ENV !== 'production') {
-      if (current) current._inactive = true;
-      target._inactive = false;
-    }
+    if (current) current._inactive = true;
+    target._inactive = false;
     this.childVM = target;
     switch (self.params.transitionMode) {
       case 'in-out':
@@ -10199,6 +10495,372 @@ function callActivateHooks(hooks, vm, cb) {
   }
 }
 
+var propBindingModes = config._propBindingModes;
+var empty = {};
+
+// regexes
+var identRE$1 = /^[$_a-zA-Z]+[\w$]*$/;
+var settablePathRE = /^[A-Za-z_$][\w$]*(\.[A-Za-z_$][\w$]*|\[[^\[\]]+\])*$/;
+
+/**
+ * Compile props on a root element and return
+ * a props link function.
+ *
+ * @param {Element|DocumentFragment} el
+ * @param {Array} propOptions
+ * @param {Vue} vm
+ * @return {Function} propsLinkFn
+ */
+
+function compileProps(el, propOptions, vm) {
+  var props = [];
+  var names = Object.keys(propOptions);
+  var i = names.length;
+  var options, name, attr, value, path, parsed, prop;
+  while (i--) {
+    name = names[i];
+    options = propOptions[name] || empty;
+
+    if (process.env.NODE_ENV !== 'production' && name === '$data') {
+      warn('Do not use $data as prop.', vm);
+      continue;
+    }
+
+    // props could contain dashes, which will be
+    // interpreted as minus calculations by the parser
+    // so we need to camelize the path here
+    path = camelize(name);
+    if (!identRE$1.test(path)) {
+      process.env.NODE_ENV !== 'production' && warn('Invalid prop key: "' + name + '". Prop keys ' + 'must be valid identifiers.', vm);
+      continue;
+    }
+
+    prop = {
+      name: name,
+      path: path,
+      options: options,
+      mode: propBindingModes.ONE_WAY,
+      raw: null
+    };
+
+    attr = hyphenate(name);
+    // first check dynamic version
+    if ((value = getBindAttr(el, attr)) === null) {
+      if ((value = getBindAttr(el, attr + '.sync')) !== null) {
+        prop.mode = propBindingModes.TWO_WAY;
+      } else if ((value = getBindAttr(el, attr + '.once')) !== null) {
+        prop.mode = propBindingModes.ONE_TIME;
+      }
+    }
+    if (value !== null) {
+      // has dynamic binding!
+      prop.raw = value;
+      parsed = parseDirective(value);
+      value = parsed.expression;
+      prop.filters = parsed.filters;
+      // check binding type
+      if (isLiteral(value) && !parsed.filters) {
+        // for expressions containing literal numbers and
+        // booleans, there's no need to setup a prop binding,
+        // so we can optimize them as a one-time set.
+        prop.optimizedLiteral = true;
+      } else {
+        prop.dynamic = true;
+        // check non-settable path for two-way bindings
+        if (process.env.NODE_ENV !== 'production' && prop.mode === propBindingModes.TWO_WAY && !settablePathRE.test(value)) {
+          prop.mode = propBindingModes.ONE_WAY;
+          warn('Cannot bind two-way prop with non-settable ' + 'parent path: ' + value, vm);
+        }
+      }
+      prop.parentPath = value;
+
+      // warn required two-way
+      if (process.env.NODE_ENV !== 'production' && options.twoWay && prop.mode !== propBindingModes.TWO_WAY) {
+        warn('Prop "' + name + '" expects a two-way binding type.', vm);
+      }
+    } else if ((value = getAttr(el, attr)) !== null) {
+      // has literal binding!
+      prop.raw = value;
+    } else if (process.env.NODE_ENV !== 'production') {
+      // check possible camelCase prop usage
+      var lowerCaseName = path.toLowerCase();
+      value = /[A-Z\-]/.test(name) && (el.getAttribute(lowerCaseName) || el.getAttribute(':' + lowerCaseName) || el.getAttribute('v-bind:' + lowerCaseName) || el.getAttribute(':' + lowerCaseName + '.once') || el.getAttribute('v-bind:' + lowerCaseName + '.once') || el.getAttribute(':' + lowerCaseName + '.sync') || el.getAttribute('v-bind:' + lowerCaseName + '.sync'));
+      if (value) {
+        warn('Possible usage error for prop `' + lowerCaseName + '` - ' + 'did you mean `' + attr + '`? HTML is case-insensitive, remember to use ' + 'kebab-case for props in templates.', vm);
+      } else if (options.required) {
+        // warn missing required
+        warn('Missing required prop: ' + name, vm);
+      }
+    }
+    // push prop
+    props.push(prop);
+  }
+  return makePropsLinkFn(props);
+}
+
+/**
+ * Build a function that applies props to a vm.
+ *
+ * @param {Array} props
+ * @return {Function} propsLinkFn
+ */
+
+function makePropsLinkFn(props) {
+  return function propsLinkFn(vm, scope) {
+    // store resolved props info
+    vm._props = {};
+    var i = props.length;
+    var prop, path, options, value, raw;
+    while (i--) {
+      prop = props[i];
+      raw = prop.raw;
+      path = prop.path;
+      options = prop.options;
+      vm._props[path] = prop;
+      if (raw === null) {
+        // initialize absent prop
+        initProp(vm, prop, undefined);
+      } else if (prop.dynamic) {
+        // dynamic prop
+        if (prop.mode === propBindingModes.ONE_TIME) {
+          // one time binding
+          value = (scope || vm._context || vm).$get(prop.parentPath);
+          initProp(vm, prop, value);
+        } else {
+          if (vm._context) {
+            // dynamic binding
+            vm._bindDir({
+              name: 'prop',
+              def: propDef,
+              prop: prop
+            }, null, null, scope); // el, host, scope
+          } else {
+              // root instance
+              initProp(vm, prop, vm.$get(prop.parentPath));
+            }
+        }
+      } else if (prop.optimizedLiteral) {
+        // optimized literal, cast it and just set once
+        var stripped = stripQuotes(raw);
+        value = stripped === raw ? toBoolean(toNumber(raw)) : stripped;
+        initProp(vm, prop, value);
+      } else {
+        // string literal, but we need to cater for
+        // Boolean props with no value, or with same
+        // literal value (e.g. disabled="disabled")
+        // see https://github.com/vuejs/vue-loader/issues/182
+        value = options.type === Boolean && (raw === '' || raw === hyphenate(prop.name)) ? true : raw;
+        initProp(vm, prop, value);
+      }
+    }
+  };
+}
+
+/**
+ * Process a prop with a rawValue, applying necessary coersions,
+ * default values & assertions and call the given callback with
+ * processed value.
+ *
+ * @param {Vue} vm
+ * @param {Object} prop
+ * @param {*} rawValue
+ * @param {Function} fn
+ */
+
+function processPropValue(vm, prop, rawValue, fn) {
+  var isSimple = prop.dynamic && isSimplePath(prop.parentPath);
+  var value = rawValue;
+  if (value === undefined) {
+    value = getPropDefaultValue(vm, prop);
+  }
+  value = coerceProp(prop, value);
+  var coerced = value !== rawValue;
+  if (!assertProp(prop, value, vm)) {
+    value = undefined;
+  }
+  if (isSimple && !coerced) {
+    withoutConversion(function () {
+      fn(value);
+    });
+  } else {
+    fn(value);
+  }
+}
+
+/**
+ * Set a prop's initial value on a vm and its data object.
+ *
+ * @param {Vue} vm
+ * @param {Object} prop
+ * @param {*} value
+ */
+
+function initProp(vm, prop, value) {
+  processPropValue(vm, prop, value, function (value) {
+    defineReactive(vm, prop.path, value);
+  });
+}
+
+/**
+ * Update a prop's value on a vm.
+ *
+ * @param {Vue} vm
+ * @param {Object} prop
+ * @param {*} value
+ */
+
+function updateProp(vm, prop, value) {
+  processPropValue(vm, prop, value, function (value) {
+    vm[prop.path] = value;
+  });
+}
+
+/**
+ * Get the default value of a prop.
+ *
+ * @param {Vue} vm
+ * @param {Object} prop
+ * @return {*}
+ */
+
+function getPropDefaultValue(vm, prop) {
+  // no default, return undefined
+  var options = prop.options;
+  if (!hasOwn(options, 'default')) {
+    // absent boolean value defaults to false
+    return options.type === Boolean ? false : undefined;
+  }
+  var def = options['default'];
+  // warn against non-factory defaults for Object & Array
+  if (isObject(def)) {
+    process.env.NODE_ENV !== 'production' && warn('Invalid default value for prop "' + prop.name + '": ' + 'Props with type Object/Array must use a factory function ' + 'to return the default value.', vm);
+  }
+  // call factory function for non-Function types
+  return typeof def === 'function' && options.type !== Function ? def.call(vm) : def;
+}
+
+/**
+ * Assert whether a prop is valid.
+ *
+ * @param {Object} prop
+ * @param {*} value
+ * @param {Vue} vm
+ */
+
+function assertProp(prop, value, vm) {
+  if (!prop.options.required && ( // non-required
+  prop.raw === null || // abscent
+  value == null) // null or undefined
+  ) {
+      return true;
+    }
+  var options = prop.options;
+  var type = options.type;
+  var valid = !type;
+  var expectedTypes = [];
+  if (type) {
+    if (!isArray(type)) {
+      type = [type];
+    }
+    for (var i = 0; i < type.length && !valid; i++) {
+      var assertedType = assertType(value, type[i]);
+      expectedTypes.push(assertedType.expectedType);
+      valid = assertedType.valid;
+    }
+  }
+  if (!valid) {
+    if (process.env.NODE_ENV !== 'production') {
+      warn('Invalid prop: type check failed for prop "' + prop.name + '".' + ' Expected ' + expectedTypes.map(formatType).join(', ') + ', got ' + formatValue(value) + '.', vm);
+    }
+    return false;
+  }
+  var validator = options.validator;
+  if (validator) {
+    if (!validator(value)) {
+      process.env.NODE_ENV !== 'production' && warn('Invalid prop: custom validator check failed for prop "' + prop.name + '".', vm);
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Force parsing value with coerce option.
+ *
+ * @param {*} value
+ * @param {Object} options
+ * @return {*}
+ */
+
+function coerceProp(prop, value) {
+  var coerce = prop.options.coerce;
+  if (!coerce) {
+    return value;
+  }
+  // coerce is a function
+  return coerce(value);
+}
+
+/**
+ * Assert the type of a value
+ *
+ * @param {*} value
+ * @param {Function} type
+ * @return {Object}
+ */
+
+function assertType(value, type) {
+  var valid;
+  var expectedType;
+  if (type === String) {
+    expectedType = 'string';
+    valid = typeof value === expectedType;
+  } else if (type === Number) {
+    expectedType = 'number';
+    valid = typeof value === expectedType;
+  } else if (type === Boolean) {
+    expectedType = 'boolean';
+    valid = typeof value === expectedType;
+  } else if (type === Function) {
+    expectedType = 'function';
+    valid = typeof value === expectedType;
+  } else if (type === Object) {
+    expectedType = 'object';
+    valid = isPlainObject(value);
+  } else if (type === Array) {
+    expectedType = 'array';
+    valid = isArray(value);
+  } else {
+    valid = value instanceof type;
+  }
+  return {
+    valid: valid,
+    expectedType: expectedType
+  };
+}
+
+/**
+ * Format type for output
+ *
+ * @param {String} type
+ * @return {String}
+ */
+
+function formatType(type) {
+  return type ? type.charAt(0).toUpperCase() + type.slice(1) : 'custom type';
+}
+
+/**
+ * Format value
+ *
+ * @param {*} value
+ * @return {String}
+ */
+
+function formatValue(val) {
+  return Object.prototype.toString.call(val).slice(8, -1);
+}
+
 var bindingModes = config._propBindingModes;
 
 var propDef = {
@@ -10213,10 +10875,7 @@ var propDef = {
     var twoWay = prop.mode === bindingModes.TWO_WAY;
 
     var parentWatcher = this.parentWatcher = new Watcher(parent, parentKey, function (val) {
-      val = coerceProp(prop, val);
-      if (assertProp(prop, val)) {
-        child[childKey] = val;
-      }
+      updateProp(child, prop, val);
     }, {
       twoWay: twoWay,
       filters: prop.filters,
@@ -10295,6 +10954,32 @@ var transDurationProp = transitionProp + 'Duration';
 var animDurationProp = animationProp + 'Duration';
 
 /**
+ * If a just-entered element is applied the
+ * leave class while its enter transition hasn't started yet,
+ * and the transitioned property has the same value for both
+ * enter/leave, then the leave transition will be skipped and
+ * the transitionend event never fires. This function ensures
+ * its callback to be called after a transition has started
+ * by waiting for double raf.
+ *
+ * It falls back to setTimeout on devices that support CSS
+ * transitions but not raf (e.g. Android 4.2 browser) - since
+ * these environments are usually slow, we are giving it a
+ * relatively large timeout.
+ */
+
+var raf = inBrowser && window.requestAnimationFrame;
+var waitForTransitionStart = raf
+/* istanbul ignore next */
+? function (fn) {
+  raf(function () {
+    raf(fn);
+  });
+} : function (fn) {
+  setTimeout(fn, 50);
+};
+
+/**
  * A Transition object that encapsulates the state and logic
  * of the transition.
  *
@@ -10320,7 +11005,7 @@ function Transition(el, id, hooks, vm) {
   /* istanbul ignore if */
   if (process.env.NODE_ENV !== 'production') {
     if (this.type && this.type !== TYPE_TRANSITION && this.type !== TYPE_ANIMATION) {
-      warn('invalid CSS transition type for transition="' + this.id + '": ' + this.type);
+      warn('invalid CSS transition type for transition="' + this.id + '": ' + this.type, vm);
     }
   }
   // bind
@@ -10378,19 +11063,13 @@ p$1.enter = function (op, cb) {
  */
 
 p$1.enterNextTick = function () {
-  // Important hack:
-  // in Chrome, if a just-entered element is applied the
-  // leave class while its interpolated property still has
-  // a very small value (within one frame), Chrome will
-  // skip the leave transition entirely and not firing the
-  // transtionend event. Therefore we need to protected
-  // against such cases using a one-frame timeout.
-  this.justEntered = true;
-  var self = this;
-  setTimeout(function () {
-    self.justEntered = false;
-  }, 17);
+  var _this = this;
 
+  // prevent transition skipping
+  this.justEntered = true;
+  waitForTransitionStart(function () {
+    _this.justEntered = false;
+  });
   var enterDone = this.enterDone;
   var type = this.getCssTransitionType(this.enterClass);
   if (!this.pendingJsCb) {
@@ -10667,187 +11346,6 @@ var internalDirectives = {
   transition: transition$1
 };
 
-var propBindingModes = config._propBindingModes;
-var empty = {};
-
-// regexes
-var identRE$1 = /^[$_a-zA-Z]+[\w$]*$/;
-var settablePathRE = /^[A-Za-z_$][\w$]*(\.[A-Za-z_$][\w$]*|\[[^\[\]]+\])*$/;
-
-/**
- * Compile props on a root element and return
- * a props link function.
- *
- * @param {Element|DocumentFragment} el
- * @param {Array} propOptions
- * @return {Function} propsLinkFn
- */
-
-function compileProps(el, propOptions) {
-  var props = [];
-  var names = Object.keys(propOptions);
-  var i = names.length;
-  var options, name, attr, value, path, parsed, prop;
-  while (i--) {
-    name = names[i];
-    options = propOptions[name] || empty;
-
-    if (process.env.NODE_ENV !== 'production' && name === '$data') {
-      warn('Do not use $data as prop.');
-      continue;
-    }
-
-    // props could contain dashes, which will be
-    // interpreted as minus calculations by the parser
-    // so we need to camelize the path here
-    path = camelize(name);
-    if (!identRE$1.test(path)) {
-      process.env.NODE_ENV !== 'production' && warn('Invalid prop key: "' + name + '". Prop keys ' + 'must be valid identifiers.');
-      continue;
-    }
-
-    prop = {
-      name: name,
-      path: path,
-      options: options,
-      mode: propBindingModes.ONE_WAY,
-      raw: null
-    };
-
-    attr = hyphenate(name);
-    // first check dynamic version
-    if ((value = getBindAttr(el, attr)) === null) {
-      if ((value = getBindAttr(el, attr + '.sync')) !== null) {
-        prop.mode = propBindingModes.TWO_WAY;
-      } else if ((value = getBindAttr(el, attr + '.once')) !== null) {
-        prop.mode = propBindingModes.ONE_TIME;
-      }
-    }
-    if (value !== null) {
-      // has dynamic binding!
-      prop.raw = value;
-      parsed = parseDirective(value);
-      value = parsed.expression;
-      prop.filters = parsed.filters;
-      // check binding type
-      if (isLiteral(value) && !parsed.filters) {
-        // for expressions containing literal numbers and
-        // booleans, there's no need to setup a prop binding,
-        // so we can optimize them as a one-time set.
-        prop.optimizedLiteral = true;
-      } else {
-        prop.dynamic = true;
-        // check non-settable path for two-way bindings
-        if (process.env.NODE_ENV !== 'production' && prop.mode === propBindingModes.TWO_WAY && !settablePathRE.test(value)) {
-          prop.mode = propBindingModes.ONE_WAY;
-          warn('Cannot bind two-way prop with non-settable ' + 'parent path: ' + value);
-        }
-      }
-      prop.parentPath = value;
-
-      // warn required two-way
-      if (process.env.NODE_ENV !== 'production' && options.twoWay && prop.mode !== propBindingModes.TWO_WAY) {
-        warn('Prop "' + name + '" expects a two-way binding type.');
-      }
-    } else if ((value = getAttr(el, attr)) !== null) {
-      // has literal binding!
-      prop.raw = value;
-    } else if (process.env.NODE_ENV !== 'production') {
-      // check possible camelCase prop usage
-      var lowerCaseName = path.toLowerCase();
-      value = /[A-Z\-]/.test(name) && (el.getAttribute(lowerCaseName) || el.getAttribute(':' + lowerCaseName) || el.getAttribute('v-bind:' + lowerCaseName) || el.getAttribute(':' + lowerCaseName + '.once') || el.getAttribute('v-bind:' + lowerCaseName + '.once') || el.getAttribute(':' + lowerCaseName + '.sync') || el.getAttribute('v-bind:' + lowerCaseName + '.sync'));
-      if (value) {
-        warn('Possible usage error for prop `' + lowerCaseName + '` - ' + 'did you mean `' + attr + '`? HTML is case-insensitive, remember to use ' + 'kebab-case for props in templates.');
-      } else if (options.required) {
-        // warn missing required
-        warn('Missing required prop: ' + name);
-      }
-    }
-    // push prop
-    props.push(prop);
-  }
-  return makePropsLinkFn(props);
-}
-
-/**
- * Build a function that applies props to a vm.
- *
- * @param {Array} props
- * @return {Function} propsLinkFn
- */
-
-function makePropsLinkFn(props) {
-  return function propsLinkFn(vm, scope) {
-    // store resolved props info
-    vm._props = {};
-    var i = props.length;
-    var prop, path, options, value, raw;
-    while (i--) {
-      prop = props[i];
-      raw = prop.raw;
-      path = prop.path;
-      options = prop.options;
-      vm._props[path] = prop;
-      if (raw === null) {
-        // initialize absent prop
-        initProp(vm, prop, getDefault(vm, options));
-      } else if (prop.dynamic) {
-        // dynamic prop
-        if (prop.mode === propBindingModes.ONE_TIME) {
-          // one time binding
-          value = (scope || vm._context || vm).$get(prop.parentPath);
-          initProp(vm, prop, value);
-        } else {
-          if (vm._context) {
-            // dynamic binding
-            vm._bindDir({
-              name: 'prop',
-              def: propDef,
-              prop: prop
-            }, null, null, scope); // el, host, scope
-          } else {
-              // root instance
-              initProp(vm, prop, vm.$get(prop.parentPath));
-            }
-        }
-      } else if (prop.optimizedLiteral) {
-        // optimized literal, cast it and just set once
-        var stripped = stripQuotes(raw);
-        value = stripped === raw ? toBoolean(toNumber(raw)) : stripped;
-        initProp(vm, prop, value);
-      } else {
-        // string literal, but we need to cater for
-        // Boolean props with no value
-        value = options.type === Boolean && raw === '' ? true : raw;
-        initProp(vm, prop, value);
-      }
-    }
-  };
-}
-
-/**
- * Get the default value of a prop.
- *
- * @param {Vue} vm
- * @param {Object} options
- * @return {*}
- */
-
-function getDefault(vm, options) {
-  // no default, return undefined
-  if (!hasOwn(options, 'default')) {
-    // absent boolean value defaults to false
-    return options.type === Boolean ? false : undefined;
-  }
-  var def = options['default'];
-  // warn against non-factory defaults for Object & Array
-  if (isObject(def)) {
-    process.env.NODE_ENV !== 'production' && warn('Object/Array as default prop values will be shared ' + 'across multiple instances. Use a factory function ' + 'to return the default value instead.');
-  }
-  // call factory function for non-Function types
-  return typeof def === 'function' && options.type !== Function ? def.call(vm) : def;
-}
-
 // special binding prefixes
 var bindRE = /^v-bind:|^:/;
 var onRE = /^v-on:|^@/;
@@ -10855,11 +11353,9 @@ var dirAttrRE = /^v-([^:]+)(?:$|:(.*)$)/;
 var modifierRE = /\.[^\.]+/g;
 var transitionRE = /^(v-bind:|:)?transition$/;
 
-// terminal directives
-var terminalDirectives = ['for', 'if'];
-
 // default directive priority
 var DEFAULT_PRIORITY = 1000;
+var DEFAULT_TERMINAL_PRIORITY = 2000;
 
 /**
  * Compile a template and return a reusable composite link
@@ -11006,7 +11502,7 @@ function teardownDirs(vm, dirs, destroying) {
  */
 
 function compileAndLinkProps(vm, el, props, scope) {
-  var propsLinkFn = compileProps(el, props);
+  var propsLinkFn = compileProps(el, props, vm);
   var propDirs = linkAndCapture(function () {
     propsLinkFn(vm, scope);
   }, vm);
@@ -11132,9 +11628,10 @@ function compileElement(el, options) {
   }
   var linkFn;
   var hasAttrs = el.hasAttributes();
+  var attrs = hasAttrs && toArray(el.attributes);
   // check terminal directives (for & if)
   if (hasAttrs) {
-    linkFn = checkTerminalDirectives(el, options);
+    linkFn = checkTerminalDirectives(el, attrs, options);
   }
   // check element directives
   if (!linkFn) {
@@ -11146,7 +11643,7 @@ function compileElement(el, options) {
   }
   // normal directives
   if (!linkFn && hasAttrs) {
-    linkFn = compileDirectives(el.attributes, options);
+    linkFn = compileDirectives(attrs, options);
   }
   return linkFn;
 }
@@ -11375,11 +11872,12 @@ function checkComponent(el, options) {
  * If it finds one, return a terminal link function.
  *
  * @param {Element} el
+ * @param {Array} attrs
  * @param {Object} options
  * @return {Function} terminalLinkFn
  */
 
-function checkTerminalDirectives(el, options) {
+function checkTerminalDirectives(el, attrs, options) {
   // skip v-pre
   if (getAttr(el, 'v-pre') !== null) {
     return skip;
@@ -11391,13 +11889,28 @@ function checkTerminalDirectives(el, options) {
       return skip;
     }
   }
-  var value, dirName;
-  for (var i = 0, l = terminalDirectives.length; i < l; i++) {
-    dirName = terminalDirectives[i];
-    value = el.getAttribute('v-' + dirName);
-    if (value != null) {
-      return makeTerminalNodeLinkFn(el, dirName, value, options);
+
+  var attr, name, value, modifiers, matched, dirName, rawName, arg, def, termDef;
+  for (var i = 0, j = attrs.length; i < j; i++) {
+    attr = attrs[i];
+    modifiers = parseModifiers(attr.name);
+    name = attr.name.replace(modifierRE, '');
+    if (matched = name.match(dirAttrRE)) {
+      def = resolveAsset(options, 'directives', matched[1]);
+      if (def && def.terminal) {
+        if (!termDef || (def.priority || DEFAULT_TERMINAL_PRIORITY) > termDef.priority) {
+          termDef = def;
+          rawName = attr.name;
+          value = attr.value;
+          dirName = matched[1];
+          arg = matched[2];
+        }
+      }
     }
+  }
+
+  if (termDef) {
+    return makeTerminalNodeLinkFn(el, dirName, value, options, termDef, rawName, arg, modifiers);
   }
 }
 
@@ -11414,20 +11927,24 @@ skip.terminal = true;
  * @param {String} dirName
  * @param {String} value
  * @param {Object} options
- * @param {Object} [def]
+ * @param {Object} def
+ * @param {String} [rawName]
+ * @param {String} [arg]
+ * @param {Object} [modifiers]
  * @return {Function} terminalLinkFn
  */
 
-function makeTerminalNodeLinkFn(el, dirName, value, options, def) {
+function makeTerminalNodeLinkFn(el, dirName, value, options, def, rawName, arg, modifiers) {
   var parsed = parseDirective(value);
   var descriptor = {
     name: dirName,
+    arg: arg,
     expression: parsed.expression,
     filters: parsed.filters,
     raw: value,
-    // either an element directive, or if/for
-    // #2366 or custom terminal directive
-    def: def || resolveAsset(options, 'directives', dirName)
+    attr: rawName,
+    modifiers: modifiers,
+    def: def
   };
   // check ref for v-for and router-view
   if (dirName === 'for' || dirName === 'router-view') {
@@ -11476,7 +11993,7 @@ function compileDirectives(attrs, options) {
         if (name === 'class' && Array.prototype.some.call(attrs, function (attr) {
           return attr.name === ':class' || attr.name === 'v-bind:class';
         })) {
-          warn('class="' + rawValue + '": Do not mix mustache interpolation ' + 'and v-bind for "class" on the same element. Use one or the other.');
+          warn('class="' + rawValue + '": Do not mix mustache interpolation ' + 'and v-bind for "class" on the same element. Use one or the other.', options);
         }
       }
     } else
@@ -11514,12 +12031,7 @@ function compileDirectives(attrs, options) {
                 continue;
               }
 
-              dirDef = resolveAsset(options, 'directives', dirName);
-
-              if (process.env.NODE_ENV !== 'production') {
-                assertAsset(dirDef, 'directive', dirName);
-              }
-
+              dirDef = resolveAsset(options, 'directives', dirName, true);
               if (dirDef) {
                 pushDir(dirName, dirDef);
               }
@@ -11739,7 +12251,7 @@ function mergeAttrs(from, to) {
     if (!to.hasAttribute(name) && !specialCharRE.test(name)) {
       to.setAttribute(name, value);
     } else if (name === 'class' && !parseText(value)) {
-      value.split(/\s+/).forEach(function (cls) {
+      value.trim().split(/\s+/).forEach(function (cls) {
         addClass(to, cls);
       });
     }
@@ -11757,39 +12269,28 @@ function mergeAttrs(from, to) {
  * @param {Vue} vm
  */
 
-function scanSlots(template, content, vm) {
+function resolveSlots(vm, content) {
   if (!content) {
     return;
   }
-  var contents = vm._slotContents = {};
-  var slots = template.querySelectorAll('slot');
-  if (slots.length) {
-    var hasDefault, slot, name;
-    for (var i = 0, l = slots.length; i < l; i++) {
-      slot = slots[i];
-      /* eslint-disable no-cond-assign */
-      if (name = slot.getAttribute('name')) {
-        select(slot, name);
-      } else if (process.env.NODE_ENV !== 'production' && (name = getBindAttr(slot, 'name'))) {
-        warn('<slot :name="' + name + '">: slot names cannot be dynamic.');
-      } else {
-        // default slot
-        hasDefault = true;
-      }
-      /* eslint-enable no-cond-assign */
+  var contents = vm._slotContents = Object.create(null);
+  var el, name;
+  for (var i = 0, l = content.children.length; i < l; i++) {
+    el = content.children[i];
+    /* eslint-disable no-cond-assign */
+    if (name = el.getAttribute('slot')) {
+      (contents[name] || (contents[name] = [])).push(el);
     }
-    if (hasDefault) {
-      contents['default'] = extractFragment(content.childNodes, content);
+    /* eslint-enable no-cond-assign */
+    if (process.env.NODE_ENV !== 'production' && getBindAttr(el, 'slot')) {
+      warn('The "slot" attribute must be static.', vm.$parent);
     }
   }
-
-  function select(slot, name) {
-    // named slot
-    var selector = '[slot="' + name + '"]';
-    var nodes = content.querySelectorAll(selector);
-    if (nodes.length) {
-      contents[name] = extractFragment(nodes, content);
-    }
+  for (name in contents) {
+    contents[name] = extractFragment(contents[name], content);
+  }
+  if (content.hasChildNodes()) {
+    contents['default'] = extractFragment(content.childNodes, content);
   }
 }
 
@@ -11797,7 +12298,6 @@ function scanSlots(template, content, vm) {
  * Extract qualified content nodes from a node list.
  *
  * @param {NodeList} nodes
- * @param {Element} parent
  * @return {DocumentFragment}
  */
 
@@ -11806,13 +12306,11 @@ function extractFragment(nodes, parent) {
   nodes = toArray(nodes);
   for (var i = 0, l = nodes.length; i < l; i++) {
     var node = nodes[i];
-    if (node.parentNode === parent) {
-      if (isTemplate(node) && !node.hasAttribute('v-if') && !node.hasAttribute('v-for')) {
-        parent.removeChild(node);
-        node = parseTemplate(node);
-      }
-      frag.appendChild(node);
+    if (isTemplate(node) && !node.hasAttribute('v-if') && !node.hasAttribute('v-for')) {
+      parent.removeChild(node);
+      node = parseTemplate(node);
     }
+    frag.appendChild(node);
   }
   return frag;
 }
@@ -11823,9 +12321,8 @@ var compiler = Object.freeze({
 	compile: compile,
 	compileAndLinkProps: compileAndLinkProps,
 	compileRoot: compileRoot,
-	terminalDirectives: terminalDirectives,
 	transclude: transclude,
-	scanSlots: scanSlots
+	resolveSlots: resolveSlots
 });
 
 function stateMixin (Vue) {
@@ -11871,7 +12368,7 @@ function stateMixin (Vue) {
     var el = options.el;
     var props = options.props;
     if (props && !el) {
-      process.env.NODE_ENV !== 'production' && warn('Props will not be compiled if no `el` option is ' + 'provided at instantiation.');
+      process.env.NODE_ENV !== 'production' && warn('Props will not be compiled if no `el` option is ' + 'provided at instantiation.', this);
     }
     // make sure to convert string selectors into element now
     el = options.el = query(el);
@@ -11885,33 +12382,29 @@ function stateMixin (Vue) {
    */
 
   Vue.prototype._initData = function () {
-    var propsData = this._data;
-    var optionsDataFn = this.$options.data;
-    var optionsData = optionsDataFn && optionsDataFn();
-    var runtimeData;
-    if (process.env.NODE_ENV !== 'production') {
-      runtimeData = (typeof this._runtimeData === 'function' ? this._runtimeData() : this._runtimeData) || {};
-      this._runtimeData = null;
+    var dataFn = this.$options.data;
+    var data = this._data = dataFn ? dataFn() : {};
+    if (!isPlainObject(data)) {
+      data = {};
+      process.env.NODE_ENV !== 'production' && warn('data functions should return an object.', this);
     }
-    if (optionsData) {
-      this._data = optionsData;
-      for (var prop in propsData) {
-        if (process.env.NODE_ENV !== 'production' && hasOwn(optionsData, prop) && !hasOwn(runtimeData, prop)) {
-          warn('Data field "' + prop + '" is already defined ' + 'as a prop. Use prop default value instead.');
-        }
-        if (this._props[prop].raw !== null || !hasOwn(optionsData, prop)) {
-          set(optionsData, prop, propsData[prop]);
-        }
-      }
-    }
-    var data = this._data;
+    var props = this._props;
+    var runtimeData = this._runtimeData ? typeof this._runtimeData === 'function' ? this._runtimeData() : this._runtimeData : null;
     // proxy data on instance
     var keys = Object.keys(data);
     var i, key;
     i = keys.length;
     while (i--) {
       key = keys[i];
-      this._proxy(key);
+      // there are two scenarios where we can proxy a data key:
+      // 1. it's not already defined as a prop
+      // 2. it's provided via a instantiation option AND there are no
+      //    template prop present
+      if (!props || !hasOwn(props, key) || runtimeData && hasOwn(runtimeData, key) && props[key].raw === null) {
+        this._proxy(key);
+      } else if (process.env.NODE_ENV !== 'production') {
+        warn('Data field "' + key + '" is already defined ' + 'as a prop. Use prop default value instead.', this);
+      }
     }
     // observe data
     observe(data, this);
@@ -12110,7 +12603,7 @@ function eventsMixin (Vue) {
           handler._fromParent = true;
           vm.$on(name.replace(eventRE), handler);
         } else if (process.env.NODE_ENV !== 'production') {
-          warn('v-on:' + name + '="' + attrs[i].value + '"' + (vm.$options.name ? ' on component <' + vm.$options.name + '>' : '') + ' expects a function value, got ' + handler);
+          warn('v-on:' + name + '="' + attrs[i].value + '" ' + 'expects a function value, got ' + handler, vm);
         }
       }
     }
@@ -12159,7 +12652,7 @@ function eventsMixin (Vue) {
       if (method) {
         vm[action](key, method, options);
       } else {
-        process.env.NODE_ENV !== 'production' && warn('Unknown method: "' + handler + '" when ' + 'registering callback for ' + action + ': "' + key + '".');
+        process.env.NODE_ENV !== 'production' && warn('Unknown method: "' + handler + '" when ' + 'registering callback for ' + action + ': "' + key + '".', vm);
       }
     } else if (handler && type === 'object') {
       register(vm, action, key, handler.handler, handler);
@@ -12247,18 +12740,21 @@ function noop() {}
  * It registers a watcher with the expression and calls
  * the DOM update function when a change is triggered.
  *
- * @param {String} name
- * @param {Node} el
- * @param {Vue} vm
  * @param {Object} descriptor
  *                 - {String} name
  *                 - {Object} def
  *                 - {String} expression
  *                 - {Array<Object>} [filters]
+ *                 - {Object} [modifiers]
  *                 - {Boolean} literal
  *                 - {String} attr
+ *                 - {String} arg
  *                 - {String} raw
- * @param {Object} def - directive definition object
+ *                 - {String} [ref]
+ *                 - {Array<Object>} [interp]
+ *                 - {Boolean} [hasOneTime]
+ * @param {Vue} vm
+ * @param {Node} el
  * @param {Vue} [host] - transclusion host component
  * @param {Object} [scope] - v-for scope
  * @param {Fragment} [frag] - owner fragment
@@ -12294,8 +12790,6 @@ function Directive(descriptor, vm, el, host, scope, frag) {
  * Initialize the directive, mixin definition properties,
  * setup the watcher, call definition bind() and update()
  * if present.
- *
- * @param {Object} def
  */
 
 Directive.prototype._bind = function () {
@@ -12376,7 +12870,7 @@ Directive.prototype._setupParams = function () {
   var i = params.length;
   var key, val, mappedKey;
   while (i--) {
-    key = params[i];
+    key = hyphenate(params[i]);
     mappedKey = camelize(key);
     val = getBindAttr(this.el, key);
     if (val != null) {
@@ -12589,9 +13083,8 @@ function lifecycleMixin (Vue) {
     var contextOptions = this._context && this._context.$options;
     var rootLinker = compileRoot(el, options, contextOptions);
 
-    // scan for slot distribution before compiling the content
-    // so that it's decoupeld from slot/directive compilation order
-    scanSlots(el, options._content, this);
+    // resolve slot distribution
+    resolveSlots(this, options._content);
 
     // compile and link the rest
     var contentLinkFn;
@@ -12655,10 +13148,8 @@ function lifecycleMixin (Vue) {
   /**
    * Create and bind a directive to an element.
    *
-   * @param {String} name - directive name
+   * @param {Object} descriptor - parsed directive descriptor
    * @param {Node} node   - target node
-   * @param {Object} desc - parsed directive descriptor
-   * @param {Object} def  - directive definition object
    * @param {Vue} [host] - transclusion host component
    * @param {Object} [scope] - v-for scope
    * @param {Fragment} [frag] - owner fragment
@@ -12801,11 +13292,8 @@ function miscMixin (Vue) {
   Vue.prototype._applyFilters = function (value, oldValue, filters, write) {
     var filter, fn, args, arg, offset, i, l, j, k;
     for (i = 0, l = filters.length; i < l; i++) {
-      filter = filters[i];
-      fn = resolveAsset(this.$options, 'filters', filter.name);
-      if (process.env.NODE_ENV !== 'production') {
-        assertAsset(fn, 'filter', filter.name);
-      }
+      filter = filters[write ? l - i - 1 : i];
+      fn = resolveAsset(this.$options, 'filters', filter.name, true);
       if (!fn) continue;
       fn = write ? fn.write : fn.read || fn;
       if (typeof fn !== 'function') continue;
@@ -12829,14 +13317,16 @@ function miscMixin (Vue) {
    * resolves asynchronously and caches the resolved
    * constructor on the factory.
    *
-   * @param {String} id
+   * @param {String|Function} value
    * @param {Function} cb
    */
 
-  Vue.prototype._resolveComponent = function (id, cb) {
-    var factory = resolveAsset(this.$options, 'components', id);
-    if (process.env.NODE_ENV !== 'production') {
-      assertAsset(factory, 'component', id);
+  Vue.prototype._resolveComponent = function (value, cb) {
+    var factory;
+    if (typeof value === 'function') {
+      factory = value;
+    } else {
+      factory = resolveAsset(this.$options, 'components', value, true);
     }
     if (!factory) {
       return;
@@ -12863,7 +13353,7 @@ function miscMixin (Vue) {
             cbs[i](res);
           }
         }, function reject(reason) {
-          process.env.NODE_ENV !== 'production' && warn('Failed to resolve async component: ' + id + '. ' + (reason ? '\nReason: ' + reason : ''));
+          process.env.NODE_ENV !== 'production' && warn('Failed to resolve async component' + (typeof value === 'string' ? ': ' + value : '') + '. ' + (reason ? '\nReason: ' + reason : ''));
         });
       }
     } else {
@@ -13023,8 +13513,14 @@ function dataAPI (Vue) {
     }
     // include computed fields
     if (!path) {
-      for (var key in this.$options.computed) {
+      var key;
+      for (key in this.$options.computed) {
         data[key] = clean(this[key]);
+      }
+      if (this._props) {
+        for (key in this._props) {
+          data[key] = clean(this[key]);
+        }
       }
     }
     console.log(data);
@@ -13432,7 +13928,7 @@ function lifecycleAPI (Vue) {
 
   Vue.prototype.$mount = function (el) {
     if (this._isCompiled) {
-      process.env.NODE_ENV !== 'production' && warn('$mount() should be called only once.');
+      process.env.NODE_ENV !== 'production' && warn('$mount() should be called only once.', this);
       return;
     }
     el = query(el);
@@ -13463,6 +13959,9 @@ function lifecycleAPI (Vue) {
   /**
    * Teardown the instance, simply delegate to the internal
    * _destroy.
+   *
+   * @param {Boolean} remove
+   * @param {Boolean} deferCleanup
    */
 
   Vue.prototype.$destroy = function (remove, deferCleanup) {
@@ -13475,6 +13974,8 @@ function lifecycleAPI (Vue) {
    *
    * @param {Element|DocumentFragment} el
    * @param {Vue} [host]
+   * @param {Object} [scope]
+   * @param {Fragment} [frag]
    * @return {Function}
    */
 
@@ -13586,10 +14087,7 @@ var partial = {
   },
 
   insert: function insert(id) {
-    var partial = resolveAsset(this.vm.$options, 'partials', id);
-    if (process.env.NODE_ENV !== 'production') {
-      assertAsset(partial, 'partial', id);
-    }
+    var partial = resolveAsset(this.vm.$options, 'partials', id, true);
     if (partial) {
       this.factory = new FragmentFactory(this.vm, partial);
       vIf.insert.call(this);
@@ -13645,9 +14143,7 @@ function filterBy(arr, search, delimiter) {
   // because why not
   var n = delimiter === 'in' ? 3 : 2;
   // extract and flatten keys
-  var keys = toArray(arguments, n).reduce(function (prev, cur) {
-    return prev.concat(cur);
-  }, []);
+  var keys = Array.prototype.concat.apply([], toArray(arguments, n));
   var res = [];
   var item, key, val, j;
   for (var i = 0, l = arr.length; i < l; i++) {
@@ -13657,12 +14153,12 @@ function filterBy(arr, search, delimiter) {
     if (j) {
       while (j--) {
         key = keys[j];
-        if (key === '$key' && contains$1(item.$key, search) || contains$1(getPath(val, key), search)) {
+        if (key === '$key' && contains(item.$key, search) || contains(getPath(val, key), search)) {
           res.push(item);
           break;
         }
       }
-    } else if (contains$1(item, search)) {
+    } else if (contains(item, search)) {
       res.push(item);
     }
   }
@@ -13672,26 +14168,58 @@ function filterBy(arr, search, delimiter) {
 /**
  * Filter filter for arrays
  *
- * @param {String} sortKey
- * @param {String} reverse
+ * @param {String|Array<String>|Function} ...sortKeys
+ * @param {Number} [order]
  */
 
-function orderBy(arr, sortKey, reverse) {
+function orderBy(arr) {
+  var comparator = null;
+  var sortKeys = undefined;
   arr = convertArray(arr);
-  if (!sortKey) {
-    return arr;
+
+  // determine order (last argument)
+  var args = toArray(arguments, 1);
+  var order = args[args.length - 1];
+  if (typeof order === 'number') {
+    order = order < 0 ? -1 : 1;
+    args = args.length > 1 ? args.slice(0, -1) : args;
+  } else {
+    order = 1;
   }
-  var order = reverse && reverse < 0 ? -1 : 1;
-  // sort on a copy to avoid mutating original array
-  return arr.slice().sort(function (a, b) {
-    if (sortKey !== '$key') {
-      if (isObject(a) && '$value' in a) a = a.$value;
-      if (isObject(b) && '$value' in b) b = b.$value;
+
+  // determine sortKeys & comparator
+  var firstArg = args[0];
+  if (!firstArg) {
+    return arr;
+  } else if (typeof firstArg === 'function') {
+    // custom comparator
+    comparator = function (a, b) {
+      return firstArg(a, b) * order;
+    };
+  } else {
+    // string keys. flatten first
+    sortKeys = Array.prototype.concat.apply([], args);
+    comparator = function (a, b, i) {
+      i = i || 0;
+      return i >= sortKeys.length - 1 ? baseCompare(a, b, i) : baseCompare(a, b, i) || comparator(a, b, i + 1);
+    };
+  }
+
+  function baseCompare(a, b, sortKeyIndex) {
+    var sortKey = sortKeys[sortKeyIndex];
+    if (sortKey) {
+      if (sortKey !== '$key') {
+        if (isObject(a) && '$value' in a) a = a.$value;
+        if (isObject(b) && '$value' in b) b = b.$value;
+      }
+      a = isObject(a) ? getPath(a, sortKey) : a;
+      b = isObject(b) ? getPath(b, sortKey) : b;
     }
-    a = isObject(a) ? getPath(a, sortKey) : a;
-    b = isObject(b) ? getPath(b, sortKey) : b;
     return a === b ? 0 : a > b ? order : -order;
-  });
+  }
+
+  // sort on a copy to avoid mutating original array
+  return arr.slice().sort(comparator);
 }
 
 /**
@@ -13701,20 +14229,20 @@ function orderBy(arr, sortKey, reverse) {
  * @param {String} search
  */
 
-function contains$1(val, search) {
+function contains(val, search) {
   var i;
   if (isPlainObject(val)) {
     var keys = Object.keys(val);
     i = keys.length;
     while (i--) {
-      if (contains$1(val[keys[i]], search)) {
+      if (contains(val[keys[i]], search)) {
         return true;
       }
     }
   } else if (isArray(val)) {
     i = val.length;
     while (i--) {
-      if (contains$1(val[i], search)) {
+      if (contains(val[i], search)) {
         return true;
       }
     }
@@ -14011,20 +14539,210 @@ function installGlobalAPI (Vue) {
 
 installGlobalAPI(Vue);
 
-Vue.version = '1.0.17';
+Vue.version = '1.0.21';
 
 // devtools global hook
 /* istanbul ignore next */
-if (devtools) {
-  devtools.emit('init', Vue);
-} else if (process.env.NODE_ENV !== 'production' && inBrowser && /Chrome\/\d+/.test(window.navigator.userAgent)) {
-  console.log('Download the Vue Devtools for a better development experience:\n' + 'https://github.com/vuejs/vue-devtools');
-}
+setTimeout(function () {
+  if (config.devtools) {
+    if (devtools) {
+      devtools.emit('init', Vue);
+    } else if (process.env.NODE_ENV !== 'production' && inBrowser && /Chrome\/\d+/.test(window.navigator.userAgent)) {
+      console.log('Download the Vue Devtools for a better development experience:\n' + 'https://github.com/vuejs/vue-devtools');
+    }
+  }
+}, 0);
 
 module.exports = Vue;
 }).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"_process":1}],28:[function(require,module,exports){
+},{"_process":1}],29:[function(require,module,exports){
+var inserted = exports.cache = {}
+
+exports.insert = function (css) {
+  if (inserted[css]) return
+  inserted[css] = true
+
+  var elem = document.createElement('style')
+  elem.setAttribute('type', 'text/css')
+
+  if ('textContent' in elem) {
+    elem.textContent = css
+  } else {
+    elem.styleSheet.cssText = css
+  }
+
+  document.getElementsByTagName('head')[0].appendChild(elem)
+  return elem
+}
+
+},{}],30:[function(require,module,exports){
+var __vueify_style__ = require("vueify-insert-css").insert("\n.clients {\n    background-color: #666;\n    padding: 20px;\n}\n")
 'use strict';
+
+Object.defineProperty(exports, "__esModule", {
+    value: true
+});
+exports.default = {
+    data: function data() {
+        return {
+            title: 'We love our clients',
+            description: "Weather you work with us directly, or work with us through an agency, your goals are our goals.",
+            name: 'Laracasts'
+        };
+    }
+};
+if (module.exports.__esModule) module.exports = module.exports.default
+;(typeof module.exports === "function"? module.exports.options: module.exports).template = "\n<div class=\"clients\">\n    <h2>{{title}}</h2>\n    <p>{{ description }}</p>\n</div>\n"
+if (module.hot) {(function () {  module.hot.accept()
+  var hotAPI = require("vue-hot-reload-api")
+  hotAPI.install(require("vue"), true)
+  if (!hotAPI.compatible) return
+  var id = "/home/lapubell/programming/php/ofc_vueify/site/resources/assets/js/components/Clients.vue"
+  module.hot.dispose(function () {
+    require("vueify-insert-css").cache["\n.clients {\n    background-color: #666;\n    padding: 20px;\n}\n"] = false
+    document.head.removeChild(__vueify_style__)
+  })
+  if (!module.hot.data) {
+    hotAPI.createRecord(id, module.exports)
+  } else {
+    hotAPI.update(id, module.exports, (typeof module.exports === "function" ? module.exports.options : module.exports).template)
+  }
+})()}
+},{"vue":28,"vue-hot-reload-api":2,"vueify-insert-css":29}],31:[function(require,module,exports){
+var __vueify_style__ = require("vueify-insert-css").insert("/* line 4, stdin */\n.vue-home {\n  position: relative;\n  overflow: hidden; }\n  /* line 8, stdin */\n  .vue-home .video-container {\n    position: relative;\n    width: 100%;\n    height: 100%; }\n    /* line 13, stdin */\n    .vue-home .video-container video {\n      width: 100%;\n      -o-object-fit: cover;\n         object-fit: cover;\n      z-index: 1; }\n    /* line 19, stdin */\n    .vue-home .video-container .overlay {\n      position: absolute;\n      width: 100%;\n      height: 100%;\n      background-color: #000;\n      opacity: 0.5;\n      z-index: 1; }\n    /* line 28, stdin */\n    .vue-home .video-container h1 {\n      position: absolute;\n      z-index: 2;\n      font-family: \"Quattrocento\", serif;\n      color: #fff;\n      top: 20%;\n      text-align: center;\n      width: 100%;\n      font-weight: normal;\n      font-size: 30px;\n      padding: 0 15%; }\n      @media (min-width: 768px) {\n        /* line 28, stdin */\n        .vue-home .video-container h1 {\n          font-size: 36px; } }\n      @media (min-width: 991px) {\n        /* line 28, stdin */\n        .vue-home .video-container h1 {\n          font-size: 50px; } }\n")
+'use strict';
+
+Object.defineProperty(exports, "__esModule", {
+    value: true
+});
+exports.default = {
+    data: function data() {
+        return {
+            message: 'yo'
+        };
+    }
+};
+if (module.exports.__esModule) module.exports = module.exports.default
+;(typeof module.exports === "function"? module.exports.options: module.exports).template = "\n<section class=\"vue-home\">\n    <div class=\"video-container\">\n        <video autoplay=\"\" loop=\"loop\">\n            <source src=\"/videos/combined.mp4\" type=\"video/mp4\">\n        </video>\n\n        <h1>We use open source solutions to provide extraordinary results</h1>\n    </div>\n\n    <div class=\"container\">\n        <h2 class=\"headline\">Founded in 2006, Open Function Computers has been working with companies and individuals in the Pacific Northwest to solve a variety of problems</h2>\n\n        <p>With the power of Open Source technology and software, we have been able to change the way our customers do business, speak to their clients, optimize internal processes, and more. Contact us today to find out how we can help you with your next project.</p>\n\n        <p><a v-link=\"{ path: 'contact'}\" class=\"button\">Contact Us</a></p>\n\n        <h2 class=\"headline\">Case Study</h2>\n    </div>\n</section>\n"
+if (module.hot) {(function () {  module.hot.accept()
+  var hotAPI = require("vue-hot-reload-api")
+  hotAPI.install(require("vue"), true)
+  if (!hotAPI.compatible) return
+  var id = "/home/lapubell/programming/php/ofc_vueify/site/resources/assets/js/components/Home.vue"
+  module.hot.dispose(function () {
+    require("vueify-insert-css").cache["/* line 4, stdin */\n.vue-home {\n  position: relative;\n  overflow: hidden; }\n  /* line 8, stdin */\n  .vue-home .video-container {\n    position: relative;\n    width: 100%;\n    height: 100%; }\n    /* line 13, stdin */\n    .vue-home .video-container video {\n      width: 100%;\n      -o-object-fit: cover;\n         object-fit: cover;\n      z-index: 1; }\n    /* line 19, stdin */\n    .vue-home .video-container .overlay {\n      position: absolute;\n      width: 100%;\n      height: 100%;\n      background-color: #000;\n      opacity: 0.5;\n      z-index: 1; }\n    /* line 28, stdin */\n    .vue-home .video-container h1 {\n      position: absolute;\n      z-index: 2;\n      font-family: \"Quattrocento\", serif;\n      color: #fff;\n      top: 20%;\n      text-align: center;\n      width: 100%;\n      font-weight: normal;\n      font-size: 30px;\n      padding: 0 15%; }\n      @media (min-width: 768px) {\n        /* line 28, stdin */\n        .vue-home .video-container h1 {\n          font-size: 36px; } }\n      @media (min-width: 991px) {\n        /* line 28, stdin */\n        .vue-home .video-container h1 {\n          font-size: 50px; } }\n"] = false
+    document.head.removeChild(__vueify_style__)
+  })
+  if (!module.hot.data) {
+    hotAPI.createRecord(id, module.exports)
+  } else {
+    hotAPI.update(id, module.exports, (typeof module.exports === "function" ? module.exports.options : module.exports).template)
+  }
+})()}
+},{"vue":28,"vue-hot-reload-api":2,"vueify-insert-css":29}],32:[function(require,module,exports){
+var __vueify_style__ = require("vueify-insert-css").insert("/* line 6, stdin */\n.site-menu #logo-wrap {\n  display: -webkit-box;\n  display: -webkit-flex;\n  display: -ms-flexbox;\n  display: flex;\n  -webkit-box-align: center;\n  -webkit-align-items: center;\n      -ms-flex-align: center;\n          align-items: center; }\n  /* line 10, stdin */\n  .site-menu #logo-wrap a.logo-home {\n    -webkit-box-flex: 1;\n    -webkit-flex: 1;\n        -ms-flex: 1;\n            flex: 1; }\n    /* line 13, stdin */\n    .site-menu #logo-wrap a.logo-home svg {\n      margin: 0 auto;\n      width: 80%; }\n      @media (min-width: 768px) {\n        /* line 13, stdin */\n        .site-menu #logo-wrap a.logo-home svg {\n          width: 100%; } }\n  /* line 23, stdin */\n  .site-menu #logo-wrap .fa {\n    font-size: 30px;\n    color: #666; }\n    @media (min-width: 768px) {\n      /* line 23, stdin */\n      .site-menu #logo-wrap .fa {\n        display: none; } }\n\n/* line 33, stdin */\n.site-menu ul {\n  text-align: left;\n  text-transform: uppercase;\n  padding: 0;\n  margin: 0 0 15px;\n  list-style-type: none; }\n  @media (max-width: 767px) {\n    /* line 33, stdin */\n    .site-menu ul {\n      display: none; } }\n  /* line 44, stdin */\n  .site-menu ul.show {\n    display: block; }\n  /* line 48, stdin */\n  .site-menu ul a {\n    display: block;\n    font-weight: bold;\n    text-decoration: none;\n    padding: 10px 0;\n    color: #000;\n    background-size: 200% 100%;\n    background-image: -webkit-linear-gradient(left, #000 50%, transparent 50%);\n    background-image: linear-gradient(to right, #000 50%, transparent 50%);\n    background-position: 100% -100%;\n    -webkit-transition: all 0.3s;\n    transition: all 0.3s; }\n    /* line 59, stdin */\n    .site-menu ul a:hover {\n      background-position: 0 0;\n      color: #eee;\n      padding-left: 5px; }\n    /* line 66, stdin */\n    .site-menu ul a.v-link-active:before {\n      font-family: FontAwesome;\n      display: inline-block;\n      content: \"\\f105\";\n      padding-right: 5px;\n      color: #666; }\n")
+'use strict';
+
+Object.defineProperty(exports, "__esModule", {
+    value: true
+});
+exports.default = {
+    data: function data() {
+        return {
+            links: [{
+                text: 'Home',
+                target: 'home'
+            }, {
+                text: 'Clients',
+                target: 'clients'
+            }, {
+                text: 'Tools',
+                target: 'tools'
+            }, {
+                text: 'Development',
+                target: 'development'
+            }, {
+                text: 'Audio Engineering',
+                target: 'audio'
+            }, {
+                text: 'Training',
+                target: 'consulting'
+            }, {
+                text: 'Contact',
+                target: 'contact'
+            }],
+            menuShown: false
+        };
+    }
+};
+if (module.exports.__esModule) module.exports = module.exports.default
+;(typeof module.exports === "function"? module.exports.options: module.exports).template = "\n\n<nav class=\"site-menu\">\n\n    <div id=\"logo-wrap\">\n        <a v-link=\"{ path: 'home' }\" class=\"logo-home\">\n            <svg xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:cc=\"http://creativecommons.org/ns#\" xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\" xmlns:svg=\"http://www.w3.org/2000/svg\" xmlns=\"http://www.w3.org/2000/svg\" xmlns:sodipodi=\"http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd\" xmlns:inkscape=\"http://www.inkscape.org/namespaces/inkscape\" viewBox=\"0 0 80 80\" xml:space=\"preserve\" version=\"1.1\" id=\"svg2\" inkscape:version=\"0.91 r13725\" sodipodi:docname=\"logo.svg\"><sodipodi:namedview pagecolor=\"#ffffff\" bordercolor=\"#666666\" borderopacity=\"1\" objecttolerance=\"10\" gridtolerance=\"10\" guidetolerance=\"10\" inkscape:pageopacity=\"0\" inkscape:pageshadow=\"2\" inkscape:window-width=\"1297\" inkscape:window-height=\"625\" id=\"namedview4535\" showgrid=\"false\" inkscape:zoom=\"4.7353532\" inkscape:cx=\"38.011948\" inkscape:cy=\"43.577211\" inkscape:window-x=\"423\" inkscape:window-y=\"39\" inkscape:window-maximized=\"0\" inkscape:current-layer=\"svg2\"></sodipodi:namedview><metadata id=\"metadata8\"><rdf:rdf><cc:work rdf:about=\"\"><dc:format>image/svg+xml</dc:format><dc:type rdf:resource=\"http://purl.org/dc/dcmitype/StillImage\"></dc:type></cc:work></rdf:rdf></metadata><defs id=\"defs6\"><clipPath id=\"clipPath16\" clipPathUnits=\"userSpaceOnUse\"><path id=\"path18\" d=\"m0 110.788 91.9 0L91.9 0 0 0 0 110.788Z\" inkscape:connector-curvature=\"0\"></path></clipPath></defs><g transform=\"matrix(1.25,0,0,-1.25,-17.43775,147.72431)\" id=\"g10\"><g id=\"g14\" clip-path=\"url(#clipPath16)\"><g id=\"g20\" transform=\"translate(38.9751,59.5594)\"></g><g id=\"g24\" transform=\"translate(43.4336,63.0653)\"></g><g id=\"g28\" transform=\"translate(46.7583,59.1434)\"></g><g id=\"g32\" transform=\"translate(54.479,62.7889)\"></g><g id=\"g36\" transform=\"translate(54.8139,57.7698)\"></g><g id=\"g40\" transform=\"translate(32.7114,82.3616)\"><path d=\"m0 0c0-0.413-0.224-0.574-0.482-0.574-0.239 0-0.421 0.154-0.421 0.406 0 0.077 0.014 0.203 0.063 0.308l0.224 0c0.014 0.056 0.021 0.105 0.021 0.154 0 0.231-0.182 0.322-0.504 0.322-0.624 0-0.924-0.518-0.924-1.449 0-0.904 0.238-1.443 0.91-1.443 0.469 0 0.693 0.336 0.805 0.623L0-1.758c-0.098-0.322-0.427-0.931-1.268-0.931-0.959 0-1.477 0.644-1.477 1.715 0 1.275 0.651 1.92 1.611 1.92C-0.462 0.946 0 0.567 0 0\" id=\"path42\" inkscape:connector-curvature=\"0\" style=\"fill-opacity:1;fill-rule:nonzero;fill:#231f20\"></path></g><g id=\"g44\" transform=\"translate(34.7066,82.971)\"><path d=\"m0 0c-0.651 0-0.792-0.687-0.792-1.45 0-0.784 0.147-1.512 0.813-1.512 0.637 0 0.791 0.686 0.791 1.463C0.812-0.735 0.672 0 0 0m0.035 0.336c1.023 0 1.498-0.728 1.498-1.807 0-1.106-0.559-1.828-1.54-1.828-1.002 0-1.506 0.722-1.506 1.8 0 1.107 0.588 1.835 1.548 1.835\" id=\"path46\" inkscape:connector-curvature=\"0\" style=\"fill-opacity:1;fill-rule:nonzero;fill:#231f20\"></path></g><g id=\"g48\" transform=\"translate(37.7017,83.2303)\"><path d=\"m0 0 0.042-0.582c0.189 0.344 0.532 0.659 1.128 0.659 0.497 0 0.777-0.224 0.876-0.665 0.182 0.336 0.532 0.665 1.085 0.665 0.686 0 0.96-0.371 0.96-1.191l0-2.038 0.433-0.049 0-0.28-1.505 0 0 0.28 0.414 0.049 0 2.031c0 0.596-0.197 0.729-0.547 0.729-0.484 0-0.784-0.393-0.784-0.925l0-1.835 0.419-0.049 0-0.28-1.499 0 0 0.28 0.421 0.049 0 2.067c0 0.532-0.182 0.693-0.553 0.693-0.442 0-0.785-0.337-0.785-0.904l0-1.856 0.435-0.049 0-0.28-1.52 0 0 0.28 0.427 0.049 0 2.823L-0.98-0.28-0.98 0 0 0Z\" id=\"path50\" inkscape:connector-curvature=\"0\" style=\"fill-opacity:1;fill-rule:nonzero;fill:#231f20\"></path></g><g id=\"g52\" transform=\"translate(43.687,81.9344)\"><path d=\"m0 0 0-1.043c0-0.519 0.315-0.862 0.799-0.862 0.574 0 0.77 0.497 0.77 1.436 0 0.896-0.147 1.407-0.743 1.407C0.393 0.938 0 0.603 0 0m-1.078-3.306 0.42 0.049 0 4.224-0.428 0.049 0 0.28 0.974 0 0.05-0.582c0.188 0.372 0.581 0.659 1.106 0.659 0.812 0 1.253-0.602 1.253-1.786 0-1.219-0.588-1.849-1.387-1.849-0.413 0-0.714 0.119-0.91 0.308l0-1.289 0.784-0.063 0-0.28-1.862 0 0 0.28z\" id=\"path54\" inkscape:connector-curvature=\"0\" style=\"fill-opacity:1;fill-rule:nonzero;fill:#231f20\"></path></g><g id=\"g56\" transform=\"translate(49.0073,79.7493)\"><path d=\"m0 0-0.056 0.567c-0.181-0.329-0.539-0.644-1.106-0.644-0.693 0-1.016 0.371-1.016 1.191l0 2.038-0.426 0.049 0 0.28 1.084 0 0-2.375c0-0.461 0.106-0.714 0.582-0.714 0.456 0 0.827 0.337 0.827 0.974l0 1.786-0.435 0.049 0 0.28 1.093 0 0-3.152L0.974 0.28 0.974 0 0 0Z\" id=\"path58\" inkscape:connector-curvature=\"0\" style=\"fill-opacity:1;fill-rule:nonzero;fill:#231f20\"></path></g><g id=\"g60\" transform=\"translate(50.7007,82.887)\"><path d=\"m0 0-0.49 0 0 0.343 0.49 0 0 0.904 0.49 0.14 0.168 0 0-1.044 0.749 0 0-0.343-0.749 0 0-2.276c0-0.386 0.091-0.539 0.35-0.539 0.238 0 0.392 0.126 0.505 0.553l0.258-0.07C1.639-2.928 1.372-3.215 0.798-3.215 0.308-3.215 0-2.97 0-2.388L0 0Z\" id=\"path62\" inkscape:connector-curvature=\"0\" style=\"fill-opacity:1;fill-rule:nonzero;fill:#231f20\"></path></g><g id=\"g64\" transform=\"translate(54.9019,81.8646)\"><path d=\"M0 0 0 0.154C0 0.798-0.196 1.121-0.631 1.121-1.128 1.121-1.387 0.609-1.415 0L0 0Zm-0.609 1.443c0.791 0 1.281-0.469 1.281-1.52 0-0.091-0.007-0.196-0.014-0.294l-2.073 0c0-0.869 0.224-1.401 0.896-1.401 0.442 0 0.679 0.196 0.84 0.602L0.63-1.275c-0.175-0.546-0.596-0.917-1.281-0.917-1.009 0-1.486 0.693-1.486 1.772 0 1.197 0.638 1.863 1.528 1.863\" id=\"path66\" inkscape:connector-curvature=\"0\" style=\"fill-opacity:1;fill-rule:nonzero;fill:#231f20\"></path></g><g id=\"g68\" transform=\"translate(57.8413,80.0296)\"><path d=\"m0 0 0-0.28-1.8 0 0 0.28 0.427 0.049 0 2.823-0.427 0.048 0 0.281 0.988 0 0.055-0.554c0.183 0.365 0.47 0.631 0.953 0.631 0.371 0 0.679-0.217 0.679-0.652 0-0.385-0.195-0.553-0.469-0.553-0.28 0-0.441 0.168-0.434 0.469l0.21 0.091c0.007 0.028 0.014 0.056 0.014 0.084 0 0.126-0.091 0.161-0.21 0.161-0.35 0-0.701-0.497-0.701-0.91l0-1.919L0 0Z\" id=\"path70\" inkscape:connector-curvature=\"0\" style=\"fill-opacity:1;fill-rule:nonzero;fill:#231f20\"></path></g><g id=\"g72\" transform=\"translate(59.1206,80.9261)\"><path d=\"m0 0 0.28 0c0.049-0.603 0.497-0.896 0.967-0.896 0.413 0 0.651 0.195 0.651 0.581 0 0.98-1.848 0.273-1.848 1.646 0 0.602 0.455 1.05 1.092 1.05 0.483 0 0.63-0.203 0.75-0.203 0.084 0 0.104 0.077 0.111 0.203l0.231 0 0-1.092-0.28 0C1.821 1.807 1.569 2.045 1.142 2.045c-0.343 0-0.595-0.189-0.595-0.49 0-0.869 1.855-0.21 1.855-1.66 0-0.63-0.378-1.149-1.12-1.149-0.609 0-0.827 0.28-0.938 0.28-0.057 0-0.084-0.042-0.106-0.28L0-1.254 0 0Z\" id=\"path74\" inkscape:connector-curvature=\"0\" style=\"fill-opacity:1;fill-rule:nonzero;fill:#231f20\"></path></g><g id=\"g76\" transform=\"translate(18.6587,89.5111)\"><path d=\"m0 0c0 0.145-0.027 0.28-0.082 0.407-0.055 0.127-0.129 0.238-0.223 0.331-0.093 0.094-0.204 0.168-0.331 0.223-0.127 0.055-0.262 0.082-0.407 0.082l-0.48 0C-1.668 1.043-1.804 1.016-1.931 0.961-2.058 0.906-2.168 0.832-2.262 0.738-2.355 0.645-2.43 0.534-2.484 0.407-2.539 0.28-2.566 0.145-2.566 0l0-2.789c0-0.145 0.027-0.28 0.082-0.407 0.054-0.127 0.129-0.238 0.222-0.331 0.094-0.094 0.204-0.168 0.331-0.223 0.127-0.055 0.263-0.082 0.408-0.082l0.48 0c0.145 0 0.28 0.027 0.407 0.082 0.127 0.055 0.238 0.129 0.331 0.223 0.094 0.093 0.168 0.204 0.223 0.331C-0.027-3.069 0-2.934 0-2.789L0 0ZM0.583-3.434C0.491-3.648 0.365-3.836 0.205-3.996 0.045-4.156-0.143-4.282-0.357-4.374-0.572-4.466-0.801-4.512-1.043-4.512l-0.48 0c-0.243 0-0.471 0.046-0.686 0.138-0.215 0.092-0.402 0.218-0.562 0.378-0.161 0.16-0.287 0.348-0.378 0.562-0.092 0.215-0.138 0.444-0.138 0.686l0 2.707c0 0.242 0.046 0.471 0.138 0.686 0.091 0.214 0.217 0.402 0.378 0.562 0.16 0.16 0.347 0.286 0.562 0.378 0.215 0.092 0.443 0.138 0.686 0.138l0.48 0c0.242 0 0.471-0.046 0.686-0.138C-0.143 1.493 0.045 1.367 0.205 1.207 0.365 1.047 0.491 0.859 0.583 0.645 0.675 0.43 0.721 0.201 0.721-0.041l0-2.707c0-0.242-0.046-0.471-0.138-0.686\" id=\"path78\" inkscape:connector-curvature=\"0\" style=\"fill-opacity:1;fill-rule:nonzero;fill:#231f20\"></path></g><g id=\"g80\" transform=\"translate(23.8677,89.5111)\"><path d=\"m0 0c0 0.145-0.027 0.28-0.082 0.407-0.055 0.127-0.129 0.238-0.223 0.331-0.093 0.094-0.204 0.168-0.331 0.223-0.127 0.055-0.262 0.082-0.407 0.082l-0.48 0C-1.668 1.043-1.804 1.016-1.931 0.961-2.058 0.906-2.168 0.832-2.262 0.738-2.355 0.645-2.43 0.534-2.484 0.407-2.539 0.28-2.566 0.145-2.566 0l0-2.789c0-0.145 0.027-0.28 0.082-0.407 0.054-0.127 0.129-0.238 0.222-0.331 0.094-0.094 0.204-0.168 0.331-0.223 0.127-0.055 0.263-0.082 0.408-0.082l0.48 0c0.145 0 0.28 0.027 0.407 0.082 0.127 0.055 0.238 0.129 0.331 0.223 0.094 0.093 0.168 0.204 0.223 0.331C-0.027-3.069 0-2.934 0-2.789L0 0ZM0.583-3.434C0.491-3.648 0.365-3.836 0.205-3.996 0.045-4.156-0.143-4.282-0.357-4.374-0.572-4.466-0.801-4.512-1.043-4.512l-0.182 0c-0.269 0-0.519 0.055-0.75 0.164-0.23 0.11-0.427 0.262-0.591 0.457l0-2.906-0.721 0 0 8.402 0.24 0 0.393-0.609c0.164 0.223 0.37 0.4 0.618 0.53 0.248 0.131 0.518 0.197 0.811 0.197l0.182 0c0.242 0 0.471-0.046 0.686-0.138C-0.143 1.493 0.045 1.367 0.205 1.207 0.365 1.047 0.491 0.859 0.583 0.645 0.675 0.43 0.721 0.201 0.721-0.041l0-2.707c0-0.242-0.046-0.471-0.138-0.686\" id=\"path82\" inkscape:connector-curvature=\"0\" style=\"fill-opacity:1;fill-rule:nonzero;fill:#231f20\"></path></g><g id=\"g84\" transform=\"translate(29.0767,89.5111)\"><path d=\"m0 0c0 0.145-0.027 0.28-0.082 0.407-0.055 0.127-0.129 0.238-0.223 0.331-0.093 0.094-0.204 0.168-0.331 0.223-0.127 0.055-0.262 0.082-0.407 0.082l-0.48 0C-1.668 1.043-1.804 1.016-1.931 0.961-2.058 0.906-2.168 0.832-2.262 0.738-2.355 0.645-2.43 0.534-2.484 0.407-2.539 0.28-2.566 0.145-2.566 0l0-0.891 2.566 0L0 0ZM0.583-3.434C0.491-3.648 0.365-3.836 0.205-3.996 0.045-4.156-0.143-4.282-0.357-4.374-0.572-4.466-0.801-4.512-1.043-4.512l-0.48 0c-0.243 0-0.471 0.046-0.686 0.138-0.215 0.092-0.402 0.218-0.562 0.378-0.161 0.16-0.287 0.348-0.378 0.562-0.092 0.215-0.138 0.444-0.138 0.686l0 2.707c0 0.242 0.046 0.471 0.138 0.686 0.091 0.214 0.217 0.402 0.378 0.562 0.16 0.16 0.347 0.286 0.562 0.378 0.215 0.092 0.443 0.138 0.686 0.138l0.48 0c0.242 0 0.471-0.046 0.686-0.138C-0.143 1.493 0.045 1.367 0.205 1.207 0.365 1.047 0.491 0.859 0.583 0.645 0.675 0.43 0.721 0.201 0.721-0.041l0-1.412-3.287 0 0-1.336c0-0.145 0.027-0.28 0.082-0.407 0.054-0.127 0.129-0.238 0.222-0.331 0.094-0.094 0.204-0.168 0.331-0.223 0.127-0.055 0.263-0.082 0.408-0.082l0.48 0c0.145 0 0.28 0.027 0.407 0.082 0.127 0.055 0.238 0.129 0.331 0.223 0.094 0.093 0.168 0.204 0.223 0.331C-0.027-3.069 0-2.934 0-2.789l0 0.398 0.721-0.117 0-0.24c0-0.242-0.046-0.471-0.138-0.686\" id=\"path86\" inkscape:connector-curvature=\"0\" style=\"fill-opacity:1;fill-rule:nonzero;fill:#231f20\"></path></g><g id=\"g88\" transform=\"translate(34.5259,85.1165)\"><path d=\"m0 0 0 4.395c0 0.144-0.027 0.28-0.082 0.407-0.055 0.127-0.129 0.237-0.223 0.331-0.093 0.094-0.204 0.168-0.331 0.222-0.127 0.055-0.262 0.082-0.407 0.082l-0.48 0C-1.668 5.437-1.804 5.41-1.931 5.355-2.058 5.301-2.168 5.227-2.262 5.133-2.355 5.039-2.43 4.929-2.484 4.802-2.539 4.675-2.566 4.539-2.566 4.395l0-4.395-0.721 0 0 6 0.24 0 0.393-0.609c0.164 0.222 0.37 0.399 0.618 0.53 0.248 0.131 0.518 0.196 0.811 0.196l0.182 0c0.242 0 0.471-0.046 0.686-0.138C-0.143 5.888 0.045 5.762 0.205 5.602 0.365 5.441 0.491 5.254 0.583 5.039 0.675 4.824 0.721 4.596 0.721 4.354L0.721 0 0 0Z\" id=\"path90\" inkscape:connector-curvature=\"0\" style=\"fill-opacity:1;fill-rule:nonzero;fill:#231f20\"></path></g><g id=\"g92\" transform=\"translate(38.3931,91.9735)\"><path d=\"m0 0 0-1.139 1.427 0 0-0.564-1.427 0 0-4.613 1.3-0.081 0-0.46-3.187 0 0 0.46 0.806 0.081 0 4.613-0.84 0 0 0.564 0.84 0 0 0.541c0 1.564 0.69 2.635 2.117 2.635 0.817 0 1.346-0.426 1.346-1.105C2.382 0.46 2.141 0.15 1.715 0.15 1.404 0.15 1.208 0.276 1.128 0.495 1.093 0.598 1.07 0.725 1.082 0.875L1.404 0.99C1.427 1.07 1.438 1.139 1.438 1.208 1.438 1.473 1.243 1.576 0.955 1.576 0.115 1.576 0 0.794 0 0\" id=\"path94\" inkscape:connector-curvature=\"0\" style=\"fill-opacity:1;fill-rule:nonzero;fill:#7b7979\"></path></g><g id=\"g96\" transform=\"translate(44.5005,85.1165)\"><path d=\"m0 0-0.092 0.932c-0.299-0.541-0.886-1.058-1.817-1.058-1.14 0-1.669 0.609-1.669 1.955l0 3.348-0.701 0.081 0 0.46 1.783 0 0-3.9c0-0.759 0.173-1.173 0.955-1.173 0.748 0 1.357 0.551 1.357 1.599l0 2.933-0.713 0.081 0 0.46 1.794 0 0-5.177L1.6 0.46 1.6 0 0 0Z\" id=\"path98\" inkscape:connector-curvature=\"0\" style=\"fill-opacity:1;fill-rule:nonzero;fill:#7b7979\"></path></g><g id=\"g100\" transform=\"translate(48.4448,90.8348)\"><path d=\"m0 0 0.08-0.955c0.299 0.563 0.921 1.081 1.899 1.081 1.127 0 1.633-0.609 1.633-1.956l0-3.348 0.713-0.08 0-0.46-2.484 0 0 0.46 0.69 0.08 0 3.337c0 0.759-0.15 1.196-0.955 1.196-0.748 0-1.392-0.529-1.392-1.46l0-3.073 0.713-0.08 0-0.46-2.497 0 0 0.46 0.691 0.08 0 4.637L-1.6-0.46-1.6 0 0 0Z\" id=\"path102\" inkscape:connector-curvature=\"0\" style=\"fill-opacity:1;fill-rule:nonzero;fill:#7b7979\"></path></g><g id=\"g104\" transform=\"translate(57.5191,89.408)\"><path d=\"m0 0c0-0.679-0.368-0.943-0.794-0.943-0.392 0-0.69 0.253-0.69 0.667 0 0.126 0.023 0.334 0.103 0.506l0.368 0c0.024 0.092 0.035 0.173 0.035 0.253 0 0.38-0.299 0.529-0.829 0.529-1.023 0-1.518-0.851-1.518-2.381 0-1.485 0.391-2.37 1.496-2.37 0.77 0 1.139 0.552 1.323 1.024L0-2.888c-0.161-0.529-0.702-1.53-2.082-1.53-1.577 0-2.428 1.059-2.428 2.819 0 2.094 1.07 3.152 2.646 3.152C-0.76 1.553 0 0.932 0 0\" id=\"path106\" inkscape:connector-curvature=\"0\" style=\"fill-opacity:1;fill-rule:nonzero;fill:#7b7979\"></path></g><g id=\"g108\" transform=\"translate(58.7134,90.2708)\"><path d=\"m0 0-0.806 0 0 0.564 0.806 0 0 1.484 0.806 0.23 0.276 0 0-1.714 1.231 0 0-0.564-1.231 0 0-3.739c0-0.633 0.149-0.886 0.575-0.886 0.391 0 0.644 0.207 0.828 0.909L2.911-3.831C2.692-4.809 2.255-5.281 1.312-5.281 0.507-5.281 0-4.878 0-3.923L0 0Z\" id=\"path110\" inkscape:connector-curvature=\"0\" style=\"fill-opacity:1;fill-rule:nonzero;fill:#7b7979\"></path></g><g id=\"g112\" transform=\"translate(63.3364,93.5037)\"><path d=\"m0 0c0.402 0 0.713-0.184 0.713-0.702 0-0.448-0.253-0.702-0.701-0.702-0.541 0-0.714 0.311-0.714 0.691C-0.702-0.311-0.483 0 0 0m0.667-2.669 0-5.178 0.817-0.08 0-0.46-2.704 0 0 0.46 0.806 0.08 0 4.637-0.806 0.081 0 0.46 1.887 0z\" id=\"path114\" inkscape:connector-curvature=\"0\" style=\"fill-opacity:1;fill-rule:nonzero;fill:#7b7979\"></path></g><g id=\"g116\" transform=\"translate(67.7183,90.409)\"><path d=\"m0 0c-1.069 0-1.3-1.127-1.3-2.382 0-1.288 0.242-2.485 1.335-2.485 1.047 0 1.3 1.128 1.3 2.405C1.335-1.208 1.104 0 0 0m0.058 0.552c1.679 0 2.463-1.197 2.463-2.968 0-1.818-0.921-3.003-2.532-3.003-1.645 0-2.473 1.185-2.473 2.957 0 1.817 0.965 3.014 2.542 3.014\" id=\"path118\" inkscape:connector-curvature=\"0\" style=\"fill-opacity:1;fill-rule:nonzero;fill:#7b7979\"></path></g><g id=\"g120\" transform=\"translate(72.2027,90.8348)\"><path d=\"m0 0 0.081-0.955c0.299 0.563 0.92 1.081 1.898 1.081 1.127 0 1.634-0.609 1.634-1.956l0-3.348 0.713-0.08 0-0.46-2.485 0 0 0.46 0.69 0.08 0 3.337c0 0.759-0.149 1.196-0.955 1.196-0.748 0-1.391-0.529-1.391-1.46l0-3.073 0.712-0.08 0-0.46-2.496 0 0 0.46 0.69 0.08 0 4.637-0.69 0.081 0 0.46L0 0Z\" id=\"path122\" inkscape:connector-curvature=\"0\" style=\"fill-opacity:1;fill-rule:nonzero;fill:#7b7979\"></path></g><g id=\"g124\" transform=\"translate(45.2993,31.3501)\"></g><g id=\"g128\" transform=\"translate(49.7578,34.856)\"></g><g id=\"g132\" transform=\"translate(42.4514,22.6348)\"></g><g id=\"g136\" transform=\"translate(48.1901,25.3444)\"></g><g id=\"g140\" transform=\"translate(48.439,21.6138)\"></g></g></g></svg>\n        </a>\n\n        <a href=\"#\" @click.prevent=\"menuShown = !menuShown\">\n            <i class=\"fa\" v-bind:class=\"{ 'fa-bars': !menuShown, 'fa-times': menuShown }\"></i>\n        </a>\n    </div>\n\n    <ul v-bind:class=\"{ 'show': menuShown }\">\n        <li v-for=\"link in links\">\n            <a v-link=\"{ path: link.target }\">{{ link.text }}</a>\n        </li>\n    </ul>\n</nav>\n\n"
+if (module.hot) {(function () {  module.hot.accept()
+  var hotAPI = require("vue-hot-reload-api")
+  hotAPI.install(require("vue"), true)
+  if (!hotAPI.compatible) return
+  var id = "/home/lapubell/programming/php/ofc_vueify/site/resources/assets/js/components/Menu.vue"
+  module.hot.dispose(function () {
+    require("vueify-insert-css").cache["/* line 6, stdin */\n.site-menu #logo-wrap {\n  display: -webkit-box;\n  display: -webkit-flex;\n  display: -ms-flexbox;\n  display: flex;\n  -webkit-box-align: center;\n  -webkit-align-items: center;\n      -ms-flex-align: center;\n          align-items: center; }\n  /* line 10, stdin */\n  .site-menu #logo-wrap a.logo-home {\n    -webkit-box-flex: 1;\n    -webkit-flex: 1;\n        -ms-flex: 1;\n            flex: 1; }\n    /* line 13, stdin */\n    .site-menu #logo-wrap a.logo-home svg {\n      margin: 0 auto;\n      width: 80%; }\n      @media (min-width: 768px) {\n        /* line 13, stdin */\n        .site-menu #logo-wrap a.logo-home svg {\n          width: 100%; } }\n  /* line 23, stdin */\n  .site-menu #logo-wrap .fa {\n    font-size: 30px;\n    color: #666; }\n    @media (min-width: 768px) {\n      /* line 23, stdin */\n      .site-menu #logo-wrap .fa {\n        display: none; } }\n\n/* line 33, stdin */\n.site-menu ul {\n  text-align: left;\n  text-transform: uppercase;\n  padding: 0;\n  margin: 0 0 15px;\n  list-style-type: none; }\n  @media (max-width: 767px) {\n    /* line 33, stdin */\n    .site-menu ul {\n      display: none; } }\n  /* line 44, stdin */\n  .site-menu ul.show {\n    display: block; }\n  /* line 48, stdin */\n  .site-menu ul a {\n    display: block;\n    font-weight: bold;\n    text-decoration: none;\n    padding: 10px 0;\n    color: #000;\n    background-size: 200% 100%;\n    background-image: -webkit-linear-gradient(left, #000 50%, transparent 50%);\n    background-image: linear-gradient(to right, #000 50%, transparent 50%);\n    background-position: 100% -100%;\n    -webkit-transition: all 0.3s;\n    transition: all 0.3s; }\n    /* line 59, stdin */\n    .site-menu ul a:hover {\n      background-position: 0 0;\n      color: #eee;\n      padding-left: 5px; }\n    /* line 66, stdin */\n    .site-menu ul a.v-link-active:before {\n      font-family: FontAwesome;\n      display: inline-block;\n      content: \"\\f105\";\n      padding-right: 5px;\n      color: #666; }\n"] = false
+    document.head.removeChild(__vueify_style__)
+  })
+  if (!module.hot.data) {
+    hotAPI.createRecord(id, module.exports)
+  } else {
+    hotAPI.update(id, module.exports, (typeof module.exports === "function" ? module.exports.options : module.exports).template)
+  }
+})()}
+},{"vue":28,"vue-hot-reload-api":2,"vueify-insert-css":29}],33:[function(require,module,exports){
+var __vueify_style__ = require("vueify-insert-css").insert(".stagger-transition {\n  -webkit-transform: all .5s ease;\n          transform: all .5s ease;\n  opacity: 1;\n}\n.stagger-enter {\n  opacity: 0;\n}\n.stagger-leave {\n  opacity: 0;\n}\n")
+'use strict';
+
+Object.defineProperty(exports, "__esModule", {
+    value: true
+});
+exports.default = {
+    data: function data() {
+        return {
+            tools: ['Laravel', 'Vue.js', 'MODX', 'GoLang', 'Flask']
+        };
+    }
+};
+if (module.exports.__esModule) module.exports = module.exports.default
+;(typeof module.exports === "function"? module.exports.options: module.exports).template = "\n\n<section>\n    <h2>The tools in our toolbox don't define us, they empower us to bring your goals and vision to life.</h2>\n    <ul>\n        <li v-for=\"tool in tools\" transition=\"stagger\" stagger=\"100\">{{ tool }}</li>\n    </ul>\n</section>\n\n"
+if (module.hot) {(function () {  module.hot.accept()
+  var hotAPI = require("vue-hot-reload-api")
+  hotAPI.install(require("vue"), true)
+  if (!hotAPI.compatible) return
+  var id = "/home/lapubell/programming/php/ofc_vueify/site/resources/assets/js/components/Tools.vue"
+  module.hot.dispose(function () {
+    require("vueify-insert-css").cache[".stagger-transition {\n  -webkit-transform: all .5s ease;\n          transform: all .5s ease;\n  opacity: 1;\n}\n.stagger-enter {\n  opacity: 0;\n}\n.stagger-leave {\n  opacity: 0;\n}\n"] = false
+    document.head.removeChild(__vueify_style__)
+  })
+  if (!module.hot.data) {
+    hotAPI.createRecord(id, module.exports)
+  } else {
+    hotAPI.update(id, module.exports, (typeof module.exports === "function" ? module.exports.options : module.exports).template)
+  }
+})()}
+},{"vue":28,"vue-hot-reload-api":2,"vueify-insert-css":29}],34:[function(require,module,exports){
+'use strict';
+
+var _Home = require('./components/Home.vue');
+
+var _Home2 = _interopRequireDefault(_Home);
+
+var _Clients = require('./components/Clients.vue');
+
+var _Clients2 = _interopRequireDefault(_Clients);
+
+var _Menu = require('./components/Menu.vue');
+
+var _Menu2 = _interopRequireDefault(_Menu);
+
+var _Tools = require('./components/Tools.vue');
+
+var _Tools2 = _interopRequireDefault(_Tools);
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
 var Vue = require('vue');
 var VueRouter = require('vue-router');
@@ -14032,41 +14750,32 @@ var VueRouter = require('vue-router');
 Vue.use(require('vue-resource'));
 Vue.use(VueRouter);
 
-// components
-var Clients = Vue.extend({
-    template: '<div>wtf?</div>'
-});
-var Header = Vue.extend({
-    template: '<h1>open function computers</h1>'
-});
-var MainNav = Vue.extend({
-    template: '<nav>' + '<a v-link="{ path: \'/\' }">Home</a>' + '<a v-link="{ path: \'clients\' }">Clients</a>' + '<a v-link="{ path: \'tools\' }">Tools</a>' + '</nav>'
-});
-var Tools = Vue.extend({
-    template: '<ul>' + '<li>Laravel</li>' + '<li>Vue.js</li>' + '<li>MODX</li>' + '<li>Wordpress (boo)</li>' + '</ul>'
-});
-
 var App = Vue.extend({
-    template: '<div><ofc></ofc><menu></menu>' + '<router-view></router-view><a v-link="{ path: \'clients\' }">Clients</a></div>',
     components: {
-        ofc: Header,
-        menu: MainNav
+        menu: _Menu2.default
     }
 });
 
 var router = new VueRouter();
 
 router.map({
+    '/home': {
+        component: _Home2.default
+    },
     '/clients': {
-        component: Clients
+        component: _Clients2.default
     },
     '/tools': {
-        component: Tools
+        component: _Tools2.default
     }
+});
+
+router.redirect({
+    '*': '/home'
 });
 
 router.start(App, '#app');
 
-},{"vue":27,"vue-resource":15,"vue-router":26}]},{},[28]);
+},{"./components/Clients.vue":30,"./components/Home.vue":31,"./components/Menu.vue":32,"./components/Tools.vue":33,"vue":28,"vue-resource":16,"vue-router":27}]},{},[34]);
 
 //# sourceMappingURL=main.js.map

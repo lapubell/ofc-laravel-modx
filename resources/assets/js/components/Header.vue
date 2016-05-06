@@ -1,19 +1,27 @@
 <template>
-    <div>
-        <p>open function computers!</p>
+    <div id='logo-wrap'>
     </div>
 </template>
 
-<style lang='less'>
-    p {
-        font-size: 18px;
-    }
-</style>
+<style lang='scss'>
+@import "../../sass/variables";
 
-<script>
-export default {
-    data() {
-        message: 'yo yo yo'
+#logo-wrap {
+    display: flex;
+    align-items: center;
+
+    svg {
+        margin: 0 auto;
+        width: 80%;
+    }
+
+    .fa {
+        font-size: 30px;
+
+        @media (min-width: $screen-md-min) {
+            display: none;
+        }
     }
 }
-</script>
+</style>
+
